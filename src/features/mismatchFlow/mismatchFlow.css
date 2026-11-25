@@ -1,0 +1,43 @@
+/* Mismatch flow. Uses the design tokens from theme.css and the dx-btn styles from docx.css. */
+.mf-launch{position:fixed;right:20px;bottom:20px;z-index:60;box-shadow:var(--pop)}
+.mf-drawer{position:fixed;right:0;top:0;bottom:0;width:420px;max-width:100vw;z-index:70;background:var(--surface);border-left:1px solid var(--line);box-shadow:var(--pop);overflow:auto;display:flex;flex-direction:column;gap:4px}
+.mf-drawer>header,.mf-modal>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.mf-drawer section{padding:10px 16px;display:grid;gap:8px}
+.mf-drawer>footer{margin-top:auto;padding:12px 16px;border-top:1px solid var(--line);display:grid;gap:6px;position:sticky;bottom:0;background:var(--surface)}
+.mf-drawer select,.mf-field input{height:32px;border:1px solid var(--line-2);border-radius:8px;padding:0 8px;background:var(--surface);color:var(--ink);font:inherit}
+.mf-up{display:flex;gap:8px}.mf-up select{flex:1}
+.mf-doc{border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:grid;gap:6px}
+.mf-doc.parked{border-color:var(--warn-line);background:var(--warn-soft)}
+.mf-doc.failed{border-color:var(--err-line)}
+.mf-doc-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}.mf-doc-h small{color:var(--ink-3);overflow-wrap:anywhere}.mf-doc-h .dx-chip{margin-left:auto}
+.mf-doc-a{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.mf-doc p,.mf-drawer p{margin:0}
+.mf-warn{color:var(--warn);font-weight:600}.mf-err{color:var(--err);font-weight:600}.mf-ok{color:var(--ok);font-weight:600}
+.mf-block{background:var(--warn-soft);border-top:1px solid var(--warn-line);border-bottom:1px solid var(--warn-line)}
+.mf-block ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.mf-field{display:grid;gap:3px;font-size:12px}.mf-field em{font-style:normal;color:var(--ink-3)}
+.mf-field.auto input{background:var(--ok-soft);border-color:var(--ok-line)}
+.mf-field.review input{background:var(--warn-soft);border-color:var(--warn-line)}
+
+.mf-wrap{position:fixed;inset:0;z-index:90;display:grid;place-items:center}
+.mf-scrim{position:absolute;inset:0;background:rgba(37,40,51,.45)}
+.mf-modal{position:relative;width:min(960px,96vw);max-height:92vh;display:flex;flex-direction:column;background:var(--surface);border-radius:14px;box-shadow:var(--pop);color:var(--ink)}
+.mf-modal>header>div:first-child{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mf-nav{display:flex;gap:6px;align-items:center;margin-left:auto}
+.mf-body{padding:12px 16px;overflow:auto}.mf-body h4{margin:12px 0 6px}
+.mf-modal>footer{padding:12px 16px;border-top:1px solid var(--line);display:grid;gap:8px}
+.mf-actions{display:flex;gap:8px;flex-wrap:wrap}.mf-count{font-size:12px;color:var(--ink-3)}
+.mf-pill{font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 9px}
+.mf-pill.major{background:var(--err-soft);color:var(--err)}.mf-pill.minor{background:var(--warn-soft);color:var(--warn)}.mf-pill.ai{background:var(--info-soft);color:var(--info)}
+.mf-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.mf-table th,.mf-table td{text-align:left;vertical-align:top;padding:6px;border-bottom:1px solid var(--line)}
+.mf-table th small{display:block;font-weight:400;color:var(--ink-3)}
+.mf-cell{width:100%;text-align:left;border:1px solid var(--line-2);border-radius:8px;padding:6px 8px;background:var(--surface);color:var(--ink);font:inherit;cursor:pointer}
+.mf-cell[aria-pressed="true"]{border-color:var(--p200);background:var(--p0);box-shadow:0 0 0 1px var(--p200) inset}
+.mf-cell.tick.off{text-decoration:line-through;color:var(--ink-4);background:var(--surface-2)}
+.mf-cell mark{background:var(--warn-soft);color:inherit;border-radius:3px;padding:0 2px}
+.mf-cell:focus-visible,.mf-table button:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+
+.mf-toasts{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:100;display:grid;gap:6px}
+.mf-toast{padding:8px 14px;border-radius:10px;font-weight:600;box-shadow:var(--pop);background:var(--g800);color:#fff;max-width:80vw}
+.mf-toast.error{background:var(--ert)}
