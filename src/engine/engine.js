@@ -3689,7 +3689,7 @@ function navHTML() {
   const on = k => S.view === k;
   const t = (k, l, i) => `<button class="ntab${on(k) ? ' on' : ''}" data-act="go" data-v="${k}"${on(k) ? ' aria-current="page"' : ''} aria-label="${l}">${ic(i)}<span class="ntl">${l}</span></button>`;
   return `<span class="brand"><img src="${logoUrl}" alt="Uncia, dare to go beyond"></span><span class="nav-div"></span>
-  <nav class="ntabs" aria-label="Sections">${t('los', 'LOS', 'layers')}${t('board', 'CRM', 'inbox')}${S.role === 'adm' ? t('admin', 'Admin', 'route') : ''}</nav><span class="nav-sp"></span>
+  <nav class="ntabs" aria-label="Sections">${t('los', 'LOS', 'layers')}${t('board', 'CRM', 'inbox')}</nav><span class="nav-sp"></span>
   ${S.view === 'board' && ['sales', 'cm'].includes(S.role) ? `<button class="btn btn-sm nnew" data-act="newlead">${ic('plus')}<span>New lead</span></button>` : ''}${whoBtn(true)}`;
 }
 function caseTopHTML() {
@@ -6062,9 +6062,1431 @@ Object.assign(ACT, {
   resetall() { S.qseen = {}; S.wotv = 'stage'; S.wtx = null; _reset10(); }
 });
 
-/* ---------------- start-up ---------------- */
-initAdmin(); initCases(); applyTheme();
 
+/* =====================================================================
+   v11: first and last name on a new lead; case facts the RM can change
+   at login. A change is checked against the documents on the file;
+   when none shows it, a sanction condition asks for one.
+   ===================================================================== */
+
+/* ---------------- New lead: first name and last name ---------------- */
+const NLNM_IND = [['a1f', 'First name'], ['a1l', 'Last name']], NLNM_CO = [['a1n', 'Name']];
+NLD9.ind.forEach(d => { d.f = [].concat(...d.f.map(k => k === 'a1n' ? ['a1f', 'a1l'] : [k])); });
+Object.assign(NLV9, { a1f: 'Sameer', a1l: 'Joshi' });
+function nlNameSync(N) {
+  N = N || S.nl; if (!N || (N.f.atype || {}).v === 'Company or firm') return;
+  const p = ['a1f', 'a1l'].map(k => N.f[k] || {}), nm = p.map(x => (x.v || '').trim()).filter(Boolean).join(' '), rd = p.find(x => x.src && x.src !== 'typed' && x.v);
+  N.f.a1n = { v: nm, src: rd ? rd.src : 'typed', conf: rd ? rd.conf : null };
+}
+function nlNameFields() { while (NLF9.length && ['a1n', 'a1f', 'a1l'].includes(NLF9[0][0])) NLF9.shift(); NLF9.unshift(...(isCo() ? NLNM_CO : NLNM_IND)); }
+const _nlSheet11 = nlSheet;
+nlSheet = function () {
+  if (!S.sheet || S.sheet.k !== 'lead') return '';
+  if (!S.nl) S.nl = nlInit9(!nlCase().lead.hidden);
+  nlNameFields(); nlNameSync();
+  return _nlSheet11();
+};
+const _nlCreate11 = nlCreate9;
+nlCreate9 = function (N) { nlNameSync(N); return _nlCreate11(N); };
+document.addEventListener('input', ev => { const k = ev.target && ev.target.dataset && ev.target.dataset.nl; if ((k === 'a1f' || k === 'a1l') && S.nl) nlNameSync(); });
+
+/* ---------------- case facts at login: change, check, condition ---------------- */
+Object.assign(ICO, { zap: '<path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/>' });
+/* what each document on Sameer's file shows; other files use the value the system read */
+const FXDOC = { N1: { 'inc:a1': { sal_a1: [['August 2026', 122000], ['September 2026', 124000], ['October 2026', 126000]], f16_a1: [['FY 2025-26, a month', 118000]], '@aa': [['Salary credits, last 6 months', 124000]] } } };
+const fxIs = (k, p) => k.indexOf(p) === 0;
+const _canEdit11 = canEdit;
+canEdit = function (c) { return _canEdit11(c) || (['sales', 'cm'].includes(S.role) && E && E.st.k === 'docs' && !(c.lead && !c.lead.in)); };
+function fxGet(c, k) {
+  if (k === 'loan') return c.v.loan; if (k === 'tenure') return c.v.tenure; if (k === 'price') return c.prop.agreement;
+  if (fxIs(k, 'inc:')) return c.apps.find(a => a.id === k.slice(4)).inc;
+  if (fxIs(k, 'ob:')) return c.oblig.find(o => o.id === k.slice(3)).count ? 1 : 0;
+}
+function fx0(c, k) { const w = c.w.fx0 = c.w.fx0 || {}; if (!(k in w)) w[k] = fxGet(c, k); return w[k]; }
+function fxSet(c, k, v) {
+  if (k === 'loan') c.v.loan = v; else if (k === 'tenure') c.v.tenure = v;
+  else if (k === 'price') { c.prop.agreement = v; if (c.lead) c.lead.price = v; }
+  else if (fxIs(k, 'inc:')) c.apps.find(a => a.id === k.slice(4)).inc = v;
+}
+function fxNorm(k, n) { if (k === 'loan' || k === 'price') return Math.round(clamp(n, 100000, 500000000) / 1000) * 1000; if (k === 'tenure') return Math.round(clamp(n, 1, 30)) * 12; return Math.round(clamp(n, 0, 10000000)); }
+const fxV = (k, x) => k === 'tenure' ? yrsTxt(x) : k === 'loan' || k === 'price' ? lakh(x) : fxIs(k, 'inc:') ? inr(x) : x ? 'Running' : 'Closed';
+function fxFmt(c, k, v) { return fxIs(k, 'inc:') ? inr(v) + ' a month' : fxIs(k, 'ob:') ? (v ? 'counted in FOIR' : 'left out of FOIR') : fxV(k, v); }
+function fxLabel(c, k) {
+  if (k === 'loan') return 'Loan amount'; if (k === 'tenure') return 'Tenure'; if (k === 'price') return 'Property price';
+  if (fxIs(k, 'inc:')) return c.apps.find(x => x.id === k.slice(4)).name.split(' ')[0] + '\u2019s monthly pay';
+  return c.oblig.find(x => x.id === k.slice(3)).t;
+}
+const fxLow = (c, k) => fxIs(k, 'inc:') ? fxLabel(c, k) : lc1(fxLabel(c, k));
+function fxDocName(id, t, lab) {
+  if (/^sal/.test(id)) return lab && /\d{4}$/.test(lab) ? 'the ' + lab + ' salary slip' : 'the salary slips';
+  if (/^f16/.test(id)) return 'Form 16'; if (/^itr/.test(id)) return lab && /^FY/.test(lab) ? 'the ' + lab.split(',')[0] + ' ITR' : 'the ITR'; if (id === '@aa') return 'the salary credits in the bank data'; if (id === '@bur') return 'the credit report';
+  return 'the ' + lc1(t.replace(/, [A-Z][a-z]+$/, ''));
+}
+/* a document in plain words: "the salary slips", "Form 16" */
+function fxSrcNm(s) {
+  if (/^sal/.test(s.id)) return 'the salary slips'; if (/^f16/.test(s.id)) return 'Form 16'; if (/^itr/.test(s.id)) return 'the ITR';
+  if (s.id === '@aa') return 'the bank data'; if (s.id === '@bur') return 'the credit report'; if (s.id === 'app') return 'the application form';
+  return 'the ' + lc1(s.t.replace(/, [A-Z][a-z]+$/, ''));
+}
+function fxDue(c, k, L) {
+  const a = fxIs(k, 'inc:') ? c.apps.find(x => x.id === k.slice(4)) : null, p = a ? (a.sex === 'F' ? 'her ' : a.sex === 'M' ? 'his ' : 'their ') : '';
+  return p ? p + listAnd(L.map(s => fxSrcNm(s).replace(/^the /, ''))) : listAnd(L.map(fxSrcNm));
+}
+/* the documents a fact can come from, and what each shows */
+function fxSrc(c, k) {
+  const doc = id => c.docs.find(x => x.id === id), L = [], v0 = fx0(c, k), rich = (FXDOC[c.id] || {})[k] || (fxIs(k, 'inc:') && (c.apps.find(a => a.id === k.slice(4)) || {}).docVals) || {};
+  const add = (id, t, vals) => L.push({ id, t, vals, in: id[0] === '@' ? true : !!(doc(id) && doc(id).up) });
+  if (k === 'loan' || k === 'tenure') { const d = doc('app'); if (d) add('app', d.t, [['As applied', k === 'loan' ? c.v.applied.loan : c.v.applied.tenure]]); }
+  else if (k === 'price') ['ats', 'afs', 'allot'].forEach(id => { const d = doc(id); if (d) add(id, d.t, [['Price', v0]]); });
+  else if (fxIs(k, 'inc:')) {
+    const aid = k.slice(4);
+    c.docs.filter(d => /^(sal|f16|itr)_/.test(d.id) && d.id.slice(-aid.length - 1) === '_' + aid).forEach(d => add(d.id, d.t, rich[d.id] || [[/^sal/.test(d.id) ? 'Average of 3 months' : /^f16/.test(d.id) ? 'A month' : 'From the return, a month', v0]]));
+    if (aid === 'a1' && /Account Aggregator/.test((c.bank || {}).via || '')) add('@aa', 'Bank credits, Account Aggregator', rich['@aa'] || [['Last 6 months', v0]]);
+  } else if (fxIs(k, 'ob:')) { const o = c.oblig.find(x => x.id === k.slice(3)); add('@bur', 'Credit report', [['Running', 1]]); }
+  return L;
+}
+function fxNeed(c, k, v) {
+  const a = fxIs(k, 'inc:') ? c.apps.find(x => x.id === k.slice(4)) : null;
+  if (a) return [(a.emp === 'Salaried' ? 'Salary slip for ' : 'Income proof for ') + a.name.split(' ')[0] + ' showing ' + inr(v) + ' a month', DCAT[2]];
+  if (k === 'price') return [(c.variant === 'resale' ? 'Agreement to sell' : 'Agreement') + ' showing a price of ' + lakh(v), DCAT[4]];
+  if (fxIs(k, 'ob:')) return ['Closure letter for the ' + lc1(c.oblig.find(x => x.id === k.slice(3)).t), DCAT[2]];
+  return ['Revised application form, e-signed, for ' + lakh(c.v.loan) + ' over ' + yrsTxt(c.v.tenure), DCAT[0]];
+}
+function fxMatch(c, k, v) {
+  const L = fxSrc(c, k), inL = L.filter(s => s.in);
+  if (fxIs(k, 'ob:')) return v ? { st: 'match', L, doc: L[0], lab: 'Running' } : { st: 'none', L, raise: 1 };
+  if (fxIs(k, 'inc:') && !inL.length && L.length) return { st: 'await', L };
+  if ((k === 'loan' || k === 'tenure') && !inL.length) return { st: 'pending', L };
+  let best = null; for (const s of inL) for (const [lab, x] of s.vals) { const d = Math.abs(x - v); if (d <= Math.max(1, x * 0.005) && (!best || d < best.d)) best = { s, lab, d }; }
+  if (best) return { st: 'match', L, doc: best.s, lab: best.lab };
+  const top = inL.length ? Math.max(...inL.map(s => Math.max(...s.vals.map(z => z[1])))) : 0;
+  if ((fxIs(k, 'inc:') || k === 'price') && inL.length && v <= top) return { st: 'within', L, top };
+  return { st: 'none', L, raise: (fxIs(k, 'inc:') || k === 'price') && v > fx0(c, k) };
+}
+const FXW = () => who('sys', 'Document check', 'Checks a change against the file');
+function fxClear(c, k) {
+  c.w.extra = (c.w.extra || []).filter(x => x.fx !== k);
+  c.docs = c.docs.filter(d => d.fx !== k || d.up);
+  const id = 'fx-' + k; if (CHECKS[c.id]) CHECKS[c.id] = CHECKS[c.id].filter(x => x.id !== id); if (c.w.chk) delete c.w.chk[id];
+}
+function fxEv(c, k, F) {
+  const a = fxIs(k, 'inc:') ? c.apps.find(x => x.id === k.slice(4)) : null, s = F.L.find(z => z.in) || F.L[0];
+  if (a && s) return { kind: s.id === '@aa' ? 'Bank data' : /^sal/.test(s.id) ? 'Salary slips' : 'Income document', title: s.t, org: a.org || a.name, rows: [['Name', a.name]].concat(s.vals.map(([l, x]) => [l, inr(x)])), hi: s.vals.length, read: inr(Math.max(...s.vals.map(z => z[1]))), conf: 97 };
+  if (k === 'price') return { kind: 'Lead', title: s && s.in ? s.t : 'Price stated at the lead', org: c.prop.addr, rows: [['Price', lakh(fx0(c, k))], ['Changed to', lakh(F.to)]], hi: 1, read: lakh(fx0(c, k)), conf: 99 };
+  const o = c.oblig.find(x => x.id === k.slice(3)) || {};
+  return { kind: 'Credit report', title: 'Credit report', org: 'Pulled at the pre-screen', rows: [['Account', o.t || ''], ['Lender', o.lender || ''], ['Status', 'Running'], ['EMI', inr(o.emi || 0)]], hi: 3, read: 'Running', conf: 99 };
+}
+function fxApply(c, k, r, was, v, ctx) {
+  const me = ctx ? { name: ctx.by } : meWho(), role = ctx ? ctx.role : S.role, decl = !!(ctx && ctx.decl), F0 = c.w.fx = c.w.fx || {};
+  fxClear(c, k);
+  if (v === fx0(c, k)) {
+    delete F0[k]; if (c.w.edited) delete c.w.edited[k];
+    if (c.w.fxT && !Object.values(F0).some(x => x.cond && x.raise)) { c.w.touched = false; c.w.fxT = 0; }
+    log(c, FXW(), 'data', fxLabel(c, k) + ' is back to what the documents show', 'No condition needed.'); return;
+  }
+  const F = F0[k] = { from: was, to: v, at: ctx ? ctx.at : S8(CLK), by: me.name, role, decl, st: r.st, doc: r.doc ? fxDocName(r.doc.id, r.doc.t, r.doc.vals.length > 1 ? r.lab : '') : '', top: r.top || 0, L: r.L.map(s => ({ id: s.id, t: s.t, in: s.in, vals: s.vals })), raise: !!r.raise };
+  const looked = listAnd(r.L.map(s => fxSrcNm(s) + (s.in ? '' : ', not in yet'))) || 'the file';
+  if (r.st === 'match') { log(c, FXW(), 'data', fxLabel(c, k) + ' matches ' + F.doc, cap1(fxFmt(c, k, v)) + '.'); return; }
+  if (r.st === 'within') { log(c, FXW(), 'data', fxLabel(c, k) + ' is within what the documents show', 'Up to ' + fxV(k, r.top) + ' in ' + looked + '.'); return; }
+  if (r.st === 'pending') { log(c, FXW(), 'data', fxLabel(c, k) + ': the application form will carry it', 'The form is not signed yet. It goes to the customer with ' + fxFmt(c, k, v) + '.'); return; }
+  if (r.st === 'await') { log(c, FXW(), 'data', fxLabel(c, k) + ' counted as declared', 'Checked when ' + fxDue(c, k, r.L) + ' come in. If none shows it, a sanction condition asks for one.'); return; }
+  const [t, cat] = fxNeed(c, k, v), id = 'fx_' + k.replace(/\W/g, '_');
+  F.cond = t;
+  c.w.extra.push({ w: 'cp', t, d: fxLabel(c, k) + (decl ? ' declared' : ' changed') + ' at login by ' + me.name + '. No document showed it', fx: k });
+  c.docs.push(Object.assign(dk(id, t, cat, 'cp', id + '.pdf'), { fx: k }));
+  log(c, FXW(), 'decision', 'Sanction condition added: ' + lc1(t), 'No document on the file shows ' + fxFmt(c, k, v) + '. Looked at ' + looked + '.');
+  if (r.raise) {
+    if (!c.w.touched) { c.w.touched = true; c.w.fxT = 1; }
+    if (role !== 'cm') {
+      F.chk = 'fx-' + k;
+      const what = fxIs(k, 'ob:') ? fxLabel(c, k) + ' left out of FOIR at login' : fxLabel(c, k) + (decl ? ' declared' : ' changed') + ' at login';
+      (CHECKS[c.id] = CHECKS[c.id] || []).push({ id: F.chk, fx: k, sev: 'med', fld: k, t: what + (decl ? ', no document shows it' : ', no document yet'),
+        f: me.name + (decl ? ' declared ' + fxLow(c, k) + ' as ' + fxFmt(c, k, v) : ' changed ' + fxLow(c, k) + ' from ' + fxFmt(c, k, was) + ' to ' + fxFmt(c, k, v)) + ' at login. The system looked at ' + looked + ', and none shows it. A condition asks for ' + lc1(t) + ' before disbursement.',
+        sug: decl ? 'Accept it with the condition, or decide on what the documents show.' : 'Accept it with the condition, or decide on ' + fxFmt(c, k, was) + '.', ask: lc1(t), ev: fxEv(c, k, F) });
+      log(c, FXW(), 'decision', 'Sent to the credit manager to decide', 'A change raises eligibility without a document, so the system will not sanction this file by itself.');
+    }
+  }
+}
+function fxRun(c, k, was, v) {
+  S.fxBusy = { id: c.id, k }; render();
+  later(750, () => {
+    S.fxBusy = null; fxApply(c, k, fxMatch(c, k, v), was, v);
+    if (c.w.fxT && !Object.values(c.w.fx || {}).some(x => x.cond && x.raise)) { c.w.touched = false; c.w.fxT = 0; }
+    if (c.w.sysAt) c.w.sysAt = tick(1);
+    render();
+    const F = (c.w.fx || {})[k];
+    toast(!F ? fxLabel(c, k) + ' is back to what the documents show' : F.st === 'match' ? 'Checked: it matches ' + F.doc : F.st === 'within' ? 'Checked: within what the documents show' : F.st === 'pending' ? 'Changed. The application form will carry it' : F.st === 'await' ? 'Counted as declared. Checked when the documents come in' : 'No document shows it. Sanction condition added' + (F.chk ? ', and the credit manager decides' : ''));
+  });
+}
+function fxRecheck(c) {
+  const F0 = (c.w && c.w.fx) || {}, out = [];
+  Object.keys(F0).forEach(k => {
+    const F = F0[k]; if (!fxIs(k, 'inc:') || !['await', 'none'].includes(F.st)) return;
+    const r = fxMatch(c, k, F.to), was = F.L.filter(s => s.in).map(s => s.id).join(), now = r.L.filter(s => s.in).map(s => s.id).join();
+    if (r.st === F.st && was === now) return;
+    fxApply(c, k, r, F.from, F.to, { by: F.by, at: F.at, role: F.role, decl: F.decl }); out.push(k);
+  });
+  if (c.w.fxT && !Object.values(F0).some(x => x.cond && x.raise)) { c.w.touched = false; c.w.fxT = 0; }
+  return out;
+}
+/* the result, under the fact */
+function fxLine(c, k) {
+  if (S.fxBusy && S.fxBusy.id === c.id && S.fxBusy.k === k) return `<div class="fx-l run"><span class="spin"></span>Checking it against the documents on the file</div>`;
+  const F = (c.w.fx || {})[k]; if (!F) return '';
+  const lk = F.L.length ? `<div class="fx-lk">${F.L.map(s => `<span class="fx-s${s.in ? '' : ' na'}">${ic(s.in ? 'file' : 'clock')}<b>${esc(s.t)}</b><i>${s.in ? esc(s.vals.map(z => fxV(k, z[1])).join(', ')) : 'Not in yet'}</i></span>`).join('')}</div>` : '';
+  const by = `<small class="fx-by">${F.decl ? 'Declared' : 'Changed'} by ${esc(F.by)}, ${esc(fds(F.at))} at ${esc(ftime(F.at))}.${F.decl ? '' : ' Was ' + esc(fxFmt(c, k, F.from)) + '.'}</small>`;
+  if (F.st === 'match') return `<div class="fx-l ok">${ic('check')}<div><b>Matches ${esc(F.doc)}.</b>${by}${lk}</div></div>`;
+  if (F.st === 'within') return `<div class="fx-l ok">${ic('check')}<div><b>Within what the documents show</b>, up to ${esc(fxV(k, F.top))}.${by}${lk}</div></div>`;
+  if (F.st === 'await') { const due = F.L.filter(s => !s.in); return `<div class="fx-l info">${ic('clock')}<div><b>Counted as declared.</b> The system checks it when ${esc(fxDue(c, k, due))} ${due.length > 1 ? 'come' : 'comes'} in. If none shows it, a sanction condition asks for one.${by}${lk}</div></div>`; }
+  if (F.st === 'pending') return `<div class="fx-l info">${ic('clock')}<div><b>The application form is not signed yet.</b> It goes to the customer with ${esc(fxFmt(c, k, F.to))}, to e-sign.${by}</div></div>`;
+  return `<div class="fx-l warn">${ic('alert')}<div><b>No document shows ${esc(fxFmt(c, k, F.to))}.</b> ${F.cond ? 'Sanction condition added: ' + esc(lc1(F.cond)) + ', before disbursement.' : 'A document is still awaited.'}${F.chk ? ' The credit manager decides this file; the system will not sanction it by itself.' : ''}${by}${lk}</div></div>`;
+}
+const _editRow11 = editRow;
+editRow = function (c, key, label, val, src, hint, input) {
+  let h = _editRow11(c, key, label, val, src, hint, input); const fl = S.edit === key ? '' : fxLine(c, key);
+  if (key === 'roi' && S.role === 'sales') h = h.replace(/<button class="fe"[^>]*data-v="roi"[\s\S]*?<\/button>/, '');
+  return fl ? h.replace(/^<div class="fd">/, '<div class="fd has-fx">').replace(/<\/div>$/, fl + '</div>') : h;
+};
+const _ovLeft11 = ovLeft;
+ovLeft = function () {
+  let h = _ovLeft11(); const c = C();
+  if (E.st.k === 'docs' && canEdit(c)) h = h.replace(/<p>What-if: change a value[^<]*<\/p>/, '<p>Change a value when the customer tells you something new. The system checks it against the documents on the file. If none shows it, a sanction condition asks for one.</p>');
+  c.oblig.forEach(o => { const fl = fxLine(c, 'ob:' + o.id); if (fl) h = h.replace(new RegExp('(<label class="obl[^"]*"><input type="checkbox" data-act="oblig" data-v="' + o.id + '"[\\s\\S]*?</label>)'), '$1' + fl); });
+  return h;
+};
+const _propSnap11 = propSnapHTML;
+propSnapHTML = function () {
+  const c = C(); if (!(E.st.k === 'docs' && c.prop && c.prop.agreement)) return _propSnap11();
+  const ed = (c.w.edited || {}).price, ats = c.docs.find(d => ['ats', 'afs', 'allot'].includes(d.id)), inp = `<input class="fin sm" id="fin" type="number" step="10000" value="${c.prop.agreement}" data-autofocus>`;
+  return `<section class="panel"><div class="ph"><h3>Property price</h3><span class="note">What the customer pays for it</span></div><div class="pb"><div class="fgrid one">${editRow(c, 'price', ats ? ats.t : 'Price', lakh(c.prop.agreement), ed ? 'edit' : ats && ats.up ? 'doc' : 'dec', ats && ats.up ? 'From the ' + lc1(ats.t) : 'Stated at the lead' + (ats ? '. The ' + lc1(ats.t) + ' is due at login' : ''), inp)}</div></div></section>` + _propSnap11();
+};
+const _fsave11 = ACT.fsave, _oblig11 = ACT.oblig, _reset11 = ACT.resetall, _chkdo11 = ACT.chkdo;
+Object.assign(ACT, {
+  fsave() {
+    const c = C(), k = S.edit, el = $('#fin');
+    if (!c || !E || E.st.k !== 'docs' || !k || !el || k === 'roi') return _fsave11();
+    const n = parseFloat(el.value); if (isNaN(n)) { toast('Enter a number'); return; }
+    fx0(c, k); const was = fxGet(c, k), v = fxNorm(k, n); S.edit = null;
+    if (v === was) { render(); return; }
+    fxSet(c, k, v); c.w.edited = c.w.edited || {}; c.w.edited[k] = true;
+    log(c, meW(), 'data', fxLabel(c, k) + ' changed at login', cap1(fxFmt(c, k, was)) + ' to ' + fxFmt(c, k, v) + '.');
+    fxRun(c, k, was, v);
+  },
+  oblig(v) {
+    const c = C(); if (!c || !E || E.st.k !== 'docs' || !['sales', 'cm'].includes(S.role)) return _oblig11(v);
+    const o = c.oblig.find(x => x.id === v); if (!o) return;
+    const k = 'ob:' + v, w = c.w.fxWhy = c.w.fxWhy || {}; fx0(c, k); if (!(v in w)) w[v] = o.why;
+    o.count = !o.count; o.why = o.count ? w[v] : 'Left out by ' + meWho().name + ': to be closed before disbursement';
+    log(c, meW(), 'data', (o.count ? 'Counted in FOIR: ' : 'Left out of FOIR: ') + lc1(o.t), o.emi ? inr(o.emi) + ' a month.' : '');
+    fxRun(c, k, o.count ? 0 : 1, o.count ? 1 : 0);
+  },
+  chkdo(v) {
+    const [id, act] = String(v).split('|'), c = C(); _chkdo11(v);
+    if (act !== 'asked' || id.indexOf('fx-') !== 0) return;
+    later(SOON.reply + 80, () => { const s = c.w.chk && c.w.chk[id]; if (!s || s.st !== 'confirmed') return; const k = id.slice(3), d = c.docs.find(x => x.fx === k); if (d && !d.up) d.up = { f: d.sample, at: S8(CLK), by: (c.apps.find(a => 'inc:' + a.id === k) || c.apps[0]).name }; c.w.extra = (c.w.extra || []).filter(x => x.fx !== k); const F = (c.w.fx || {})[k]; if (F) { F.st = 'match'; F.doc = d ? d.t : F.doc; F.cond = null; } render(); });
+  },
+  resetall() { S.fxBusy = null; Object.keys(CHECKS).forEach(id => { CHECKS[id] = CHECKS[id].filter(k => !k.fx); }); _reset11(); }
+});
+
+/* =====================================================================
+   v11: the Admin page in seven sections, in both views:
+   Discovery, Workflow, Form design, Policy rules, Vendors and APIs,
+   Audit trail and Onboarding.
+   - Discovery collects the documents; one read builds the rest.
+   - The workflow shows what moves a file on from every step.
+   - Form design shows each step's screen next to the workflow. The
+     new lead and login screens can be changed by dragging, or by a
+     voice note or typed instructions. The preview changes; nothing
+     else in the LOS does.
+   - Onboarding holds roles, SOPs and the escalation matrix.
+   All people, documents and numbers are fictional.
+   ===================================================================== */
+Object.assign(AREA, { disc: 'Discovery', form: 'Form design', org: 'Onboarding' });
+Object.assign(ICO, { grip: '<circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/>', screen: '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>' });
+
+/* ---------------- Discovery: what a setup is built from ---------------- */
+const DSRC = {
+  POL: { ic: 'file', n: PDOC.n, meta: PDOC.meta },
+  AF: { ic: 'file', n: 'Home loan application form v7.pdf', meta: '6 pages. Sections for individuals and for companies' },
+  DC: { ic: 'grid', n: 'Document checklist, home loans.xlsx', meta: '3 sheets: salaried, self-employed and property' },
+  SC: { ic: 'file', n: 'Schedule of charges, home loans.pdf', meta: '2 pages. In force from 1 Oct 2026' },
+  RMX: { ic: 'grid', n: 'Role master, HRMS export.xlsx', meta: '13 roles and 24 people, with their branches' },
+  ESC: { ic: 'file', n: 'Escalation matrix, retail mortgage.pdf', meta: '1 page. 6 triggers, up to 3 levels each' },
+  VEN: { ic: 'grid', n: 'Empanelled vendors and API contracts.xlsx', meta: '19 vendors across 14 API calls' }
+};
+const dsrc = k => WSRC[k] || DSRC[k];
+const DGRP = [
+  ['proc', 'How the work is done', 'Process notes, a walkthrough and your own words', 'file', [['S1', ['wf', 'form', 'org']], ['S2', ['wf']], ['S4', ['wf']]]],
+  ['pol', 'Policy and authority', 'The credit rules and who sanctions what', 'shield', [['POL', ['pol']], ['S3', ['wf', 'org']]]],
+  ['form', 'Forms and charges', 'What you collect from customers, and the fees', 'text', [['AF', ['form']], ['DC', ['form']], ['SC', ['form']]]],
+  ['ppl', 'People', 'Who does what, and who to escalate to', 'user', [['RMX', ['org']], ['ESC', ['org']]]],
+  ['ven', 'Vendors', 'Who you buy each check from', 'link', [['VEN', ['api']]]]
+];
+const FEED = { wf: 'Workflow', form: 'Form design', pol: 'Policy rules', org: 'Onboarding', api: 'Vendors and APIs' };
+const DREAD = { S1: 'Reading the SOP: 38 pages, with OCR', S2: 'Transcribing the walkthrough: Hindi and English, 3 speakers', S3: 'Reading the approval matrix', S4: 'Reading the operations note', POL: 'Reading the credit policy: 42 pages', AF: 'Reading the application form: 6 pages', DC: 'Reading the document checklist: 3 sheets', SC: 'Reading the schedule of charges', RMX: 'Reading the role master: 13 roles, 24 people', ESC: 'Reading the escalation matrix', VEN: 'Reading the vendor list: 19 vendors' };
+const DTOOK = { S1: 'Steps, owners and turnarounds; the login documents; an SOP for each role', S2: 'Steps, and two places where practice differs from the SOP', S3: 'Who sanctions what, by amount and deviation', S4: 'Four points on letters, OTC documents and bureau re-pulls', POL: 'Every rule and limit, with its page', AF: 'The details asked for at the lead', DC: 'The documents asked for at the lead and at login', SC: 'The application fee: ₹2,500 plus GST', RMX: '13 roles and the people in them', ESC: '6 escalation triggers, up to 3 levels each', VEN: '14 API calls and the vendors for each' };
+const DLIVE = { S1: 'Read 26 Mar 2026. Version 4.2', S2: 'Transcribed 26 Mar 2026', S3: 'Read 30 Oct 2026. FY27 matrix', S4: 'Read 14 Nov 2026', POL: 'Read 3 Nov 2026. Version 12', AF: 'Read 26 Mar 2026. Version 7', DC: 'Read 26 Mar 2026', SC: 'Read 1 Oct 2026', RMX: 'Synced from HRMS every Sunday. Last on 15 Nov 2026', ESC: 'Read 26 Mar 2026', VEN: 'Read 18 Sep 2026' };
+
+/* ---------------- what moves a file on from each step ---------------- */
+const TRG = {
+  T1: ['auto', 'When the customer approves the consent by OTP'], T2: ['man', 'When the RM sends the file for login'],
+  T3: ['auto', 'When the application form, the login fee and KYC are in'], T4: ['man', 'When the credit manager accepts the login'], T5: ['auto', 'When dedupe and CKYC come back clear'],
+  T6: ['auto', 'When every bureau report is back'], D3: ['man', 'When the credit manager has verified the income'], T8: ['auto', 'As soon as eligibility is worked out'],
+  P4: ['auto', 'When all four reports are in'], D4a: ['auto', 'When the FCU report is clear, or the FCU head lifts the hold'], D4b: ['auto', 'When the valuation is close enough, or the zonal credit manager clears it'],
+  T15: ['man', 'When the credit manager records the discussion'], D5: ['man', 'When the personal discussion is recorded'],
+  T17: ['man', 'When the credit manager submits the memo'], T18: ['auto', 'When the fresh report is in'], D6: ['man', 'When the second review is done, if one was needed'],
+  T20: ['auto', 'As soon as the file is routed'], D7: ['man', 'When the sanctioning authority decides'],
+  T22: ['auto', 'When the letter and the KFS are e-signed and sent'], T23: ['man', 'When the RM marks the customer as told'], T24: ['auto', 'When the customer accepts the offer by OTP'],
+  T25: ['man', 'When central operations confirms the originals'], D9: ['man', 'When the OTC list is cleared or deferred'], T27: ['man', 'When the disbursement memo is submitted'], T28: ['man', 'When the credit manager authorises the memo'], T29: ['auto', 'Straight away']
+};
+function trgOf(it) {
+  if (it.trg) return it.trg;
+  if (it.t === 'par') return { k: 'auto', t: 'When every step in the block is done' };
+  if (it.t === 'dec') return { k: 'auto', t: 'When the branch is done' };
+  return it.r === 'sys' ? { k: 'auto', t: 'As soon as it is done' } : { k: 'man', t: 'When the owner marks it done' };
+}
+function addTriggers(F) {
+  const set = it => { if (!it.trg && TRG[it.id]) it.trg = { k: TRG[it.id][0], t: TRG[it.id][1] }; };
+  F.stages.forEach(g => { const w = arr => arr.forEach(it => { set(it); if (it.t === 'dec') it.arms.forEach(a => w(a.items)); if (it.t === 'par') w(it.lanes); }); w(g.items); });
+  return F;
+}
+const _buildFlow11 = buildFlow;
+buildFlow = function (att, text, resolve) { return addTriggers(_buildFlow11(att, text, resolve)); };
+const _newStep11 = newStep;
+newStep = function (n) { return Object.assign(_newStep11(n), { trg: { k: 'man', t: 'When the owner marks it done' } }); };
+const lastItem = g => g && g.items.length ? g.items[g.items.length - 1] : null;
+function trgHTML(it, M) {
+  if (!it) return fcA();
+  const t = trgOf(it), d = M.dm[it.id + ':tg'];
+  return `<div class="wf-tg ${t.k}"><i class="wf-l" aria-hidden="true"></i><button class="wf-tl${M.sel === it.id ? ' on' : ''}${d ? ' d-chg' : ''}" data-act="fsel" data-v="${it.id}" title="${t.k === 'auto' ? 'Moves on by itself' : 'Moves on when a person acts'}">${ic(t.k === 'auto' ? 'zap' : 'user')}<span>${esc(t.t)}</span></button><i class="wf-a" aria-hidden="true"></i></div>`;
+}
+flowHTML = function (F, M) {
+  const n = F.stages.length;
+  return `<div class="wf"><span class="wf-end">${ic('flag')}A lead comes in</span>${F.stages.map((g, i) => `${i ? trgHTML(lastItem(F.stages[i - 1]), M) : fcA()}<section class="wf-g${M.sel === g.id ? ' on' : ''}${M.dm[g.id] ? ' d-' + M.dm[g.id] : ''}"><button class="wf-gh" data-act="fsel" data-v="${g.id}"><span class="wf-gi">${i + 1}</span><b>${esc(g.n)}</b><small>${esc(slaTxt(g.sla))}</small></button><div class="wf-gb">${g.items.length ? g.items.map((it, j) => (j ? trgHTML(g.items[j - 1], M) : '') + fcItem(it, M)).join('') : '<span class="wf-skip">No steps yet</span>'}</div></section>`).join('')}${n ? trgHTML(lastItem(F.stages[n - 1]), M) : fcA()}<span class="wf-end">${ic('check')}Handed to disbursement</span></div>`;
+};
+/* the trigger in the edit panel */
+const _panelHTML11 = panelHTML;
+panelHTML = function (F) {
+  let h = _panelHTML11(F); const hit = ADM.sel ? findNode(F, ADM.sel) : null;
+  if (!hit) return h.replace('<li>' + ic('alert') + 'A question for you</li>', '<li>' + ic('alert') + 'A question for you</li><li><span class="lg-t auto">' + ic('zap') + '</span>Moves on by itself</li><li><span class="lg-t man">' + ic('user') + '</span>Moves on when a person acts</li>');
+  if (hit.stage) return h;
+  const n = hit.node, t = trgOf(n), inArm = hit.parent && (hit.parent.dec || hit.parent.par);
+  const box = inArm ? `<p class="fp-n">${ic('zap')}This step is on a branch. What moves the file on is set on the ${hit.parent.dec ? 'decision' : 'block'} it sits in.</p>` : `<div class="fp-k">What moves the file on</div><div class="fp-tg"><select class="sel" data-fe="tk|${n.id}" aria-label="How it moves on"><option value="auto"${t.k === 'auto' ? ' selected' : ''}>By itself</option><option value="man"${t.k === 'man' ? ' selected' : ''}>When a person acts</option></select><textarea class="ta" rows="2" data-fe="tt|${n.id}" aria-label="The trigger">${esc(t.t)}</textarea></div><p class="fp-n">Shown on the arrow after this ${n.t === 'dec' ? 'decision' : n.t === 'par' ? 'block' : 'step'}.</p>`;
+  const i = h.indexOf('<div class="fp-a">');
+  return i < 0 ? h + box : h.slice(0, i) + box + h.slice(i);
+};
+const _fedit11 = fedit;
+fedit = function (key, el) {
+  const [k, id] = key.split('|');
+  if (k !== 'tk' && k !== 'tt') return _fedit11(key, el);
+  const hit = findNode(curFlow(), id); if (!hit) return; const o = hit.node, t = Object.assign({}, trgOf(o)), was = (t.k === 'auto' ? 'By itself: ' : 'A person: ') + t.t;
+  if (k === 'tk') t.k = el.value === 'man' ? 'man' : 'auto'; else { const v = el.value.replace(/\s+/g, ' ').trim(); if (!v) { render(); return; } t.t = v; }
+  o.trg = t; wlog('What moves the file on after “' + short(o.n || o.q || 'the block', 50) + '”', was, (t.k === 'auto' ? 'By itself: ' : 'A person: ') + t.t); render();
+};
+const tgStr = it => { const t = trgOf(it); return (t.k === 'auto' ? 'By itself: ' : 'A person: ') + t.t; };
+flatNodes = function (F) {
+  const out = {}, ord = {};
+  F.stages.forEach(g => { out[g.id] = { k: 'stage', n: g.n, sla: slaTxt(g.sla) }; const ids = [];
+    const w = (arr, top) => arr.forEach(it => { ids.push(it.id); const tg = top ? tgStr(it) : '';
+      if (it.t === 'step') out[it.id] = { k: 'step', n: it.n, r: it.r, sla: slaTxt(it.sla), g: g.n, tg };
+      if (it.t === 'dec') { out[it.id] = { k: 'decision', n: it.q, arms: it.arms.map(a => a.l).join(' / '), g: g.n, tg }; it.arms.forEach(a => w(a.items, false)); }
+      if (it.t === 'par') { out[it.id] = { k: 'parallel block', n: 'In parallel', note: it.note || '', g: g.n, tg }; w(it.lanes, false); } });
+    w(g.items, true); ord[g.id] = ids; });
+  return { out, ord };
+};
+const _flowDiff11 = flowDiff;
+flowDiff = function (A, B) {
+  const D = _flowDiff11(A, B); if (!A || !B) return D;
+  const a = flatNodes(A).out, b = flatNodes(B).out;
+  Object.keys(b).forEach(id => { const x = a[id], y = b[id]; if (x && y.tg && x.tg !== y.tg) D.push({ id: id + ':tg', k: 'chg', t: 'What moves the file on after “' + short(y.n, 50) + '”', b: x.tg, a: y.tg }); });
+  return D;
+};
+
+/* ---------------- Form design: the screens a step shows ---------------- */
+const FLIB = {
+  a1f: ['First name', 'Sameer'], a1l: ['Last name', 'Joshi'], a1mob: ['Contact number', '10-digit mobile', 1], atype: ['Type of applicant', 'Individual', 0, 1], a1pan: ['PAN', 'ABCDE1234F'], a1inc: ['Monthly pay (₹)', '1,24,000'],
+  ltype: ['Type of loan', 'Home loan', 0, 1], loan: ['Loan amount (₹)', '55,00,000'], ten: ['Tenure (years)', '20'], ptype: ['Property type', 'Choose', 0, 1], price: ['Property value (₹)', '78,00,000'], city: ['Branch city', 'Pune', 0, 1],
+  mid: ['Middle name', ''], email: ['Email', 'name@example.com'], dob: ['Date of birth', 'DD/MM/YYYY'], emp: ['Employer', 'Company name'], alt: ['Alternate number', '10-digit mobile'], lang: ['Preferred language', 'English', 0, 1], lsrc: ['Lead source', 'Walk-in', 0, 1], pin: ['Property pincode', '411038'], coap: ['Co-applicant name', '']
+};
+const LDOC = { adh: ['Aadhaar', 'Masked copy'], pan: ['PAN card', 'Card or e-PAN'], sal: ['Salary slips', 'Last 3 months'], bank6: ['Bank statements', 'Last 6 months'], f16: ['Form 16', 'Last 2 years'], itr: ['Latest ITR', 'With the computation of income'], photo: ['Photograph', 'Passport size'] };
+const GDOC = {
+  app: ['Application form, e-signed', 'All', 0], f16l: ['Form 16, two years', 'Salaried', 2], bank6l: ['Bank statements, 6 months', 'Salaried', 3], itr2: ['ITR with computation, two years', 'Self-employed', 2], bank12: ['Bank statements, 12 months', 'Self-employed', 3], gst: ['GST returns, 12 months', 'Self-employed', 2],
+  ats: ['Agreement to sell', 'Resale', 4], deed: ['Sale deed (copy)', 'Resale', 4], ec: ['Encumbrance certificate, 13 years', 'Resale', 4], oc: ['Occupancy certificate', 'Resale', 4], share: ['Society share certificate and NOC', 'Resale flats', 4], allot: ['Allotment letter and builder NOC', 'Under construction', 4], plan: ['Approved plan and cost estimate', 'Self-construction', 4], tax: ['Property tax receipt', 'Resale', 4],
+  kyc: ['KYC of every applicant: PAN and Aadhaar', 'All', 1], photo: ['Photograph of every applicant', 'All', 1], sal3: ['Salary slips, 3 months', 'Salaried', 2], pnl: ['Profit and loss and balance sheet, CA-certified', 'Self-employed', 2], chq: ['Cancelled cheque for the EMI mandate', 'All', 3]
+};
+/* documents asked from each co-applicant added at login */
+const CDOC = { pan: ['PAN', 'Every co-applicant', 1], adh: ['Aadhaar, masked', 'Every co-applicant', 1], sal: ['Salary slips, 3 months', 'Earning, salaried', 2], f16: ['Form 16, two years', 'Earning, salaried', 2], itr: ['ITR with computation, two years', 'Earning, self-employed', 2], bank12: ['Bank statements, 12 months', 'Earning, self-employed', 3], bank6: ['Bank statements, 6 months', 'Earning, salaried', 3], photo: ['Photograph', 'Every co-applicant', 1], relp: ['Proof of relationship', 'Every co-applicant', 1] };
+const fdef = (form, list) => list === 'fields' ? FLIB : list === 'codocs' ? CDOC : form === 'lead' ? LDOC : GDOC;
+const coStr = f => f && f.on ? 'Allowed, up to ' + f.max : 'Not allowed';
+const FORM0 = {
+  lead: { fields: ['a1f', 'a1l', 'a1mob', 'atype', 'a1pan', 'a1inc', 'ltype', 'loan', 'ten', 'ptype', 'price', 'city'].map(k => ({ k, req: k === 'a1mob' ? 1 : 0 })), docs: ['adh', 'pan', 'sal'].map(k => ({ k, req: 0 })) },
+  login: { docs: ['app', 'f16l', 'itr2', 'bank12', 'gst', 'ats', 'deed', 'ec', 'oc', 'share', 'allot', 'plan'].map(k => ({ k, req: k === 'gst' ? 0 : 1 })), fee: { on: 1, amt: 3540, adj: 1 },
+    cofg: { on: 1, max: 3 }, codocs: ['pan', 'adh', 'sal', 'f16', 'itr', 'bank12'].map(k => ({ k, req: 1 })) }
+};
+/* the new setup's forms, as read from the lender's own application form, checklist and charges */
+const FORMN = {
+  lead: { fields: [['a1f', 0, 'AF'], ['a1l', 0, 'AF'], ['a1mob', 1, 'AF'], ['dob', 0, 'AF'], ['a1pan', 0, 'AF'], ['atype', 0, 'AF'], ['a1inc', 0, 'AF'], ['ltype', 0, 'AF'], ['loan', 0, 'AF'], ['ten', 0, 'AF'], ['ptype', 0, 'AF'], ['price', 0, 'AF'], ['city', 0, 'DC']].map(([k, req, src]) => ({ k, req, src })), docs: [['adh', 0], ['pan', 1], ['sal', 0], ['bank6', 0]].map(([k, req]) => ({ k, req, src: 'DC' })) },
+  login: { docs: [['app', 1], ['f16l', 1], ['itr2', 1], ['bank12', 1], ['gst', 0], ['ats', 1], ['deed', 1], ['ec', 1], ['oc', 1], ['tax', 1], ['share', 1], ['allot', 1], ['plan', 1]].map(([k, req]) => ({ k, req, src: 'DC' })), fee: { on: 1, amt: 2950, adj: 1, src: 'SC' },
+    cofg: { on: 1, max: 2, src: 'AF' }, codocs: [['pan', 1], ['adh', 1], ['sal', 1], ['f16', 1], ['itr', 1], ['bank12', 1], ['photo', 1]].map(([k, req]) => ({ k, req, src: 'DC' })) }
+};
+const FSCR = { T1: 'lead', T3: 'login' };
+const FNM = { lead: 'New lead form', login: 'Login documents' };
+const fmNm = (f, l) => l === 'codocs' ? 'Co-applicant documents' : FNM[f];
+const fmLbl = (form, list, it) => it.l || (fdef(form, list)[it.k] || [it.k])[0];
+
+/* ---------------- Onboarding: roles, SOPs and escalations ---------------- */
+const OROLE = [
+  ['rm', 'Sales RM', ['Amit Joshi, Pune Kothrud', 'Shweta Patil, Pune Baner', 'Rahul Bansal, Gurugram', 'Farida Khan, Mumbai Kandivali', 'Anoop Varghese, Kochi'], ['Capture every lead the day it comes in, with consent for the credit report', 'Collect the documents and send the file for login', 'Tell the customer about the sanction, with the key fact statement'], 'CRM and LOS: own leads and files'],
+  ['tsl', 'Tele-sales', ['Divya Nair', 'Sunita Rawat'], ['Call every new lead within 5 minutes', 'Qualify the lead and book a call back or a branch visit', 'Hand interested leads to the RM for the branch'], 'CRM: own leads'],
+  ['smgr', 'Sales manager', ['Nikhil Bhatia, head of retail sales'], ['Route leads, and reassign them when an RM is away', 'Watch the funnel and the team’s pending work', 'Nudge the team on files that are stuck'], 'CRM and LOS: every lead and file'],
+  ['bops', 'Branch operations', ['Pradeep Kamble, Pune', 'Sana Shaikh, Mumbai'], ['Log in files with the application form, login fee and KYC', 'Issue the sanction letter and key fact statement', 'Collect the signed sanction letter'], 'LOS: files of the branch'],
+  ['cm', 'Credit manager, L1', ['Rohit Kulkarni, Pune'], ['Check every login', 'Verify the income documents', 'Hold the personal discussion and write the credit memo', 'Decide files within the L1 limit'], 'LOS: files of the region'],
+  ['rcm', 'Regional credit manager, L2', ['Sneha Iyer, West region'], ['Review memos with minor deviations', 'Decide files within the L2 limit', 'Approve OTC deferrals of up to 30 days'], 'LOS: files of the region'],
+  ['zcm', 'Zonal credit manager, L3', ['Vikram Rao, West zone'], ['Decide files within the L3 limit', 'Clear valuations well below the price'], 'LOS: files of the zone'],
+  ['nch', 'National credit head, L4', ['Meera Nair'], ['Decide files above the L3 limit', 'Own the credit policy with the credit committee'], 'LOS: every file'],
+  ['cops', 'Central operations', ['Rajesh Pillai, head of operations', 'Swati Gokhale, Pune'], ['Collect the original title documents and list OTC and PDD items', 'Prepare the disbursement memo'], 'LOS: sanctioned files'],
+  ['fcu', 'FCU manager', ['Harpreet Gill'], ['Check KYC, salary slips and bank statements for fraud', 'Report within 2 working days'], 'LOS: files sent for sampling'],
+  ['lgl', 'Legal manager', ['Prakash Hegde'], ['Get the title search and legal opinion from an empanelled advocate', 'Answer the advocate’s queries'], 'LOS: property files'],
+  ['tech', 'Technical manager', ['Meghna Bose'], ['Appoint an empanelled valuer', 'Check the valuation reports'], 'LOS: property files'],
+  ['losadm', 'LOS administrator', [ADMIN.name], ['Change the setup, with a reason for each change', 'Keep the audit trail'], 'Admin']
+];
+const OSOPX = { tsl: [['Call every new lead within 5 minutes of it coming in', '5 minutes'], ['If there is no answer, try again at 30 minutes and at 2 hours', 'Same day'], ['Record the outcome and the next step in the CRM', 'Same day']], smgr: [['Check leads that are not called or not assigned, every hour', 'Every hour'], ['Go through Waiting on your team every morning, and nudge where needed', 'Daily']], losadm: [['Make every change to the live setup with a reason', 'As needed'], ['Check the audit trail every week', 'Weekly']] };
+const OESC = [
+  ['e1', 'A new lead is not called within 5 minutes', [['smgr', 15, 'min']]],
+  ['e2', 'A complete file is not logged in within 4 working hours', [['smgr', 4, 'wh'], ['cops', 1, 'wd']]],
+  ['e3', 'A legal or technical report is late', [['rcm', 1, 'wd'], ['zcm', 3, 'wd']]],
+  ['e4', 'A credit decision is past its turnaround', [['rcm', 1, 'wd'], ['zcm', 2, 'wd']]],
+  ['e5', 'A sanction letter is not issued within 1 working day', [['cops', 1, 'wd']]],
+  ['e6', 'A disbursement memo is not authorised within 4 working hours', [['rcm', 4, 'wh']]]
+];
+const ESCK = [[/first call|new lead|not called/, 'e1'], [/logged in|log in|login/, 'e2'], [/legal|technical|valuation|title/, 'e3'], [/credit decision|decision/, 'e4'], [/sanction letter/, 'e5'], [/disbursement memo|\bdm\b|disbursement/, 'e6']];
+const UNITS = { min: ['minute', 1], wh: ['working hour', 60], wd: ['working day', 540] };
+const afterTxt = l => plural(l.n, UNITS[l.u][0]);
+const ROLEN = id => { const r = OROLE.find(x => x[0] === id); return r ? r[1] : rn(id); };
+function roleLim(id) { const A = POL.auth || {}; return { cm: 'Sanctions up to ' + lakh(A.L1), rcm: 'Sanctions up to ' + lakh(A.L2), zcm: 'Sanctions up to ' + lakh(A.L3), nch: 'Sanctions above ' + lakh(A.L3) }[id] || ''; }
+function orgBuild(F, has) {
+  const roles = has.roles ? OROLE.map(([id, n, ppl, resp, acc]) => ({ id, n, ppl: ppl.slice(), resp: resp.slice(), acc, src: 'RMX' })) : [];
+  const sops = [];
+  if (has.sops && F) (roles.length ? roles : OROLE.map(([id, n]) => ({ id, n }))).forEach(r => {
+    const steps = []; eachStep(F, (t, g) => { if (t.r === r.id) steps.push({ id: r.id + '-' + steps.length, t: t.n, sla: slaTxt(t.sla), src: (t.src || [])[0] ? refLbl(t.src[0]) : '' }); });
+    (OSOPX[r.id] || []).forEach(([t, sla]) => steps.push({ id: r.id + '-' + steps.length, t, sla, src: 'Standard home loan SOP' }));
+    if (steps.length) sops.push({ id: r.id, steps });
+  });
+  const esc = has.esc ? OESC.map(([id, t, lv]) => ({ id, t, lv: lv.map(([r, n, u]) => ({ r, n, u })) })) : [];
+  return { roles, sops, esc };
+}
+
+/* ---------------- voice notes, a document, and examples ---------------- */
+const TKS = {
+  lead: { voice: { n: 'Voice note from Nikhil Bhatia, head of retail sales', meta: '0:31. Hindi and English. Mon 16 Nov 2026, 9:12', who: 'Nikhil Bhatia', role: 'smgr', dur: 31, segs: [
+      { t: 0, o: 'Lead form mein email bhi le lo, offer aur updates bhejne ke liye.', e: 'Add email to the lead form too, to send offers and updates.' },
+      { t: 11, o: 'PAN ko mandatory kar do.', e: 'Make PAN mandatory.' },
+      { t: 17, o: 'Aur branch city hata do, woh RM ki branch se aa jaata hai.', e: 'And remove branch city; it comes from the RM’s branch.' }] },
+    sug: ['Make PAN mandatory', 'Add email after the contact number', 'Remove branch city', 'Move property value above loan amount', 'Ask for bank statements for 6 months'] },
+  login: { voice: { n: 'Voice note from Rajesh Pillai, head of operations', meta: '0:26. English. Sat 14 Nov 2026, 11:20', who: 'Rajesh Pillai', role: 'cops', dur: 26, segs: [
+      { t: 0, o: 'From December we are waiving the application fee for home loans.', e: '' },
+      { t: 9, o: 'And for salaried customers, add six months of bank statements to the login documents.', e: '' }] },
+    sug: ['Stop collecting the application fee', 'Set the application fee to ₹2,500 plus GST', 'Add the property tax receipt', 'Make GST returns mandatory', 'Remove the occupancy certificate', 'Ask co-applicants for a photograph'] },
+  org: { voice: { n: 'Voice note from Meera Nair, national credit head', meta: '0:34. Hindi and English. Fri 13 Nov 2026, 18:05', who: 'Meera Nair', role: 'nch', dur: 34, segs: [
+      { t: 0, o: 'Credit decision late ho toh RCM ko ek din nahi, 4 working hours mein bata do.', e: 'If a credit decision is late, tell the RCM after 4 working hours, not one day.' },
+      { t: 13, o: 'Legal ya technical report paanch working days se late ho, toh mujhe bhi escalate karo.', e: 'If a legal or technical report is late by 5 working days, escalate it to me too.' },
+      { t: 25, o: 'Aur Kavita Rane Monday se tele-sales mein join kar rahi hai.', e: 'And Kavita Rane joins tele-sales from Monday.' }] },
+    doc: { n: 'Operations circular OPS-2026-09.pdf', meta: '1 page. Issued 13 Nov 2026 by Rajesh Pillai', who: 'Operations circular OPS-2026-09', role: 'cops', lines: ['1. A disbursement memo not authorised within 4 working hours goes to the zonal credit manager after 1 working day.', '2. Ritu Sharma joins branch operations in Pune from 1 December.', '3. Add to the branch operations SOP: check the original sale deed against the scanned copy at login.'] },
+    sug: ['Escalate a late valuation to the zonal credit manager after 2 working days', 'Add Kavita Rane to tele-sales', 'Add to the Sales RM SOP: call the customer within 1 hour of a sanction'] }
+};
+
+/* ---------------- state ---------------- */
+const tkNew = () => ({ k: null, phase: 'pick', step: 0, props: [], miss: [], txt: '', pt: 0, play: 0, added: '' });
+const _initAdmin11 = initAdmin;
+initAdmin = function () {
+  _initAdmin11(); if (!ADM) return;
+  Object.assign(ADM, { sec: 'disc', disc: { phase: 'pick', step: 0, steps: [], read: {} }, fsel: 'T1', osec: 'roles', oed: null, drag: null,
+    fm: { onb: null, live: deep(FORM0), liveW: deep(FORM0), ver: '7.0', sched: null }, fmHi: [], ogHi: [], osop: null,
+    org: { onb: null, onbSrc: {}, live: orgBuild(ADM.live.wf, { roles: 1, sops: 1, esc: 1 }), liveW: null },
+    tk: { lead: tkNew(), login: tkNew(), org: tkNew() } });
+  ADM.org.liveW = deep(ADM.org.live);
+};
+const FM = () => ONB() ? ADM.fm.onb : ADM.fm.liveW;
+const ORGC = () => ONB() ? ADM.org.onb : ADM.org.liveW;
+function ochg(area, what, b, a, why) { if (ONB()) alog2({ area, what, b: b || '', a: a || '', why: why || 'Edited in the new setup' }); }
+
+/* ---------------- the page ---------------- */
+function emptyHTML(ico, h, p, act, lbl) { return `<section class="panel emp11"><div class="pb">${ic(ico)}<div><h3>${esc(h)}</h3><p>${esc(p)}</p>${act ? `<button class="btn btn-p btn-sm" data-act="${act.split('|')[0]}" data-v="${act.split('|')[1] || ''}">${esc(lbl)}</button>` : ''}</div></div></section>`; }
+adminHTML = function () {
+  if (!ADM) initAdmin();
+  const onb = ONB(), st = staged(), O = ADM.onb, D = ADM.disc;
+  const head = `<div class="adm-h adm-h9">
+  <div class="adm-mode" role="tablist" aria-label="View">${[['onb', 'New setup', 'Build it from your documents'], ['live', 'Live setup', 'Change what is running']].map(([k, l, s]) => `<button class="${ADM.mode === k ? 'on' : ''}" data-act="amode" data-v="${k}" role="tab" aria-selected="${ADM.mode === k}"><b>${l}</b><small>${s}</small></button>`).join('')}</div></div>`;
+  const F = onb ? O.wf : ADM.live.wfW, fs = F ? flowStats(F) : null, rulesN = PRULES.length, apiOn = apiList().filter(a => a.on).length, G = ORGC(), fm = FM();
+  const askN = onb && O.pol ? PRULES.filter(r => r.ask && (O.loc[r.id] == null || O.loc[r.id] === '')).length : 0, nAdd = Object.keys(O.src).filter(k => O.src[k]).length;
+  const tabs = [
+    ['disc', 'Discovery', onb ? (D.phase === 'done' ? plural(Object.keys(D.read).length, 'document') + ' read' : nAdd ? nAdd + ' of 11 documents added' : 'Nothing added yet') : '11 documents on file', onb && D.phase === 'done', 0],
+    ['wf', 'Workflow', onb ? (F ? plural(fs.steps, 'step') + (fs.flags ? ', ' + fs.flags + ' to check' : '') : 'Not built yet') : 'Version ' + ADM.live.ver + ', ' + plural(fs.steps, 'step'), onb && F && !fs.flags, st.wf.length],
+    ['form', 'Form design', onb ? (fm ? 'New lead and login' : 'Not drafted yet') : 'Version ' + ADM.fm.ver, onb && !!fm, st.form.length],
+    ['pol', 'Policy rules', onb ? (O.pol ? plural(rulesN, 'rule') + (askN ? ', ' + askN + ' to set' : '') : 'Not read yet') : 'Version ' + POL.ver + ', ' + plural(rulesN, 'rule'), onb && O.pol && !askN, st.pol.length],
+    ['api', 'Vendors and APIs', plural(apiOn, 'call') + ' in use', onb && O.apiOk, st.api.length],
+    ['aud', 'Audit trail', plural(ADM.aud.filter(e => e.view === ADM.mode).length, 'entry', 'entries'), 0, 0],
+    ['org', 'Onboarding', G ? plural(G.roles.length, 'role') + ', ' + plural(G.esc.length, 'escalation') : 'Not set up yet', onb && !!G && G.roles.length > 0, st.org.length]];
+  const tabH = `<nav class="adm-t adm-t7" role="tablist" aria-label="Sections">${tabs.map(([k, l, s, ok, ch]) => `<button class="${ADM.sec === k ? 'on' : ''}" data-act="asec" data-v="${k}" role="tab" aria-selected="${ADM.sec === k}"><b>${ok ? ic('check') : ''}${esc(l)}</b><small>${esc(s)}</small>${ch ? `<span class="adm-ch">${ch} unsaved</span>` : ''}</button>`).join('')}</nav>`;
+  const ready = onb && F && !fs.flags && O.pol && !askN && O.apiOk && fm && G && G.roles.length;
+  const banner = ready ? `<div class="adm-ready">${ic('check')}<div><b>${O.live ? 'Go-live scheduled' : 'Ready to go live'}</b><span>${O.live ? 'This setup goes live on ' + GOLIVE + '. Until then, files run on the current live setup.' : 'The workflow, the forms, the policy rules, the vendors and the roles are set, and every question is answered.'}</span></div>${O.live ? '' : `<button class="btn btn-p btn-sm" data-act="ogolive">${ic('clock')}Schedule go-live</button>`}</div>` : '';
+  const body = { disc: discHTML, wf: wfSecHTML, form: formSecHTML, pol: polSecHTML, api: apiSecHTML, aud: audSecHTML, org: orgSecHTML }[ADM.sec]();
+  return `<div class="adm${st.n ? ' has-bar' : ''}">${head}${onb || ADM.sec === 'form' || ADM.sec === 'org' ? '' : ikHTML()}${banner}${tabH}<div class="adm-b">${body}</div>${st.n ? saveBarHTML(st) : ''}</div>`;
+};
+
+/* ---------------- 1. Discovery ---------------- */
+function discHTML() {
+  const O = ADM.onb, D = ADM.disc, onb = ONB();
+  if (onb && D.phase === 'run') return runHTML(D.steps, D.step, 'Reading what you added');
+  const item = (k, feeds) => {
+    const s = dsrc(k), on = onb ? !!O.src[k] : true, rd = onb ? (D.read[k] || (k === 'POL' && O.pol && O.src.POL)) : DLIVE[k];
+    const meta = rd ? (onb ? 'Read: ' + DTOOK[k] : rd) : s.meta;
+    const tag = `<span class="dc-f">${feeds.map(f => `<i>${FEED[f]}</i>`).join('')}</span>`;
+    if (!onb) return `<div class="sp6 on ro">${ic(s.ic || 'file')}<span><b>${esc(s.n)}</b><small>${esc(meta)}</small>${tag}</span></div>`;
+    return `<button class="sp6${on ? ' on' : ''}${rd ? ' rd' : ''}" data-act="dsrc" data-v="${k}" aria-pressed="${on}">${ic(on ? 'check' : 'plus')}<span><b>${esc(s.n)}</b><small>${esc(on ? meta : s.meta)}</small>${tag}</span></button>`;
+  };
+  const n = Object.keys(O.src).filter(k => O.src[k]).length, txt = (O.txt || '').trim();
+  const grp = ([g, t, sub, ico, items]) => `<section class="cap-c dc-c"><header>${ic(ico)}<div><b>${esc(t)}</b><small>${esc(sub)}</small></div></header>${items.map(([k, f]) => item(k, f)).join('')}${g === 'proc' && onb ? `<label class="dc-t"><span>In your own words</span><textarea class="ta cap-ta" id="ocap" rows="3" placeholder="For example: The credit manager checks every login within 4 working hours.">${esc(O.txt)}</textarea></label>` : ''}</section>`;
+  const top = onb ? `<div class="cap6-h"><h3>Discovery</h3><p>Collect what Uncia needs to set up your home loan journey: how the work is done, the credit policy, your forms and charges, who does what, and your vendors. Add what you have, in any mix. Uncia reads it all and builds each section from it, showing where every item came from.</p></div>
+    <div class="dc-prog"><b>${n} of 11 documents added</b><span class="up-bar"><i style="width:${n / 11 * 100}%"></i></span><span>${D.phase === 'done' ? 'Read. Change what you added and read it again to rebuild' : 'From your document library. PDF, Word, Excel, scans and recordings all work'}</span></div>`
+    : `<div class="cap6-h"><h3>Source library</h3><p>The documents the live setup was built from, and what each one feeds. To change the live setup from a new document, a voice note or a few lines, use Change something at the top of this page.</p></div>`;
+  const go = onb ? `<div class="cap6-go">${D.phase === 'done' ? '<span class="cap-warn">Reading again rebuilds the sections from these sources, and replaces your edits to them.</span>' : ''}<span id="dcN">${plural(n + (txt ? 1 : 0), 'source')} added</span><button class="btn btn-p" data-act="dread" id="dreadGo"${n || txt ? '' : ' disabled'}>${ic('wand')}${D.phase === 'done' ? 'Read again' : 'Read everything'}</button></div>` : '';
+  return top + `<div class="dc-g">${DGRP.map(grp).join('')}</div>` + go + (onb && D.phase === 'done' ? discResHTML() : '');
+}
+function discResHTML() {
+  const O = ADM.onb, fs = O.wf ? flowStats(O.wf) : null, G = ADM.org.onb, fm = ADM.fm.onb;
+  const askN = O.pol ? PRULES.filter(r => r.ask && (O.loc[r.id] == null || O.loc[r.id] === '')).length : 0;
+  const card = (k, ok, t, s, need) => `<button class="dr-c${ok ? ' ok' : ''}" data-act="asec" data-v="${k}">${ic(ok ? 'check' : 'alert')}<span><b>${esc(t)}</b><small>${esc(ok ? s : need)}</small></span>${ic('fwd')}</button>`;
+  return `<section class="panel dr11"><div class="ph"><h3>What was built</h3><span class="note">Open a section to check it and make changes</span></div><div class="pb dr-g">
+  ${card('wf', !!fs, 'Workflow', fs ? plural(fs.steps, 'step') + ', ' + plural(fs.decs, 'decision') + (fs.flags ? '. ' + plural(fs.flags, 'question') + ' for you' : '') : '', 'Not built: add the SOP, the walkthrough or a few lines of text')}
+  ${card('form', !!fm, 'Form design', 'The new lead form and the login documents', 'Not drafted: add the application form, the checklist or the charges')}
+  ${card('pol', !!O.pol, 'Policy rules', plural(PRULES.length, 'rule') + (askN ? '. ' + askN + ' needs a number from you' : ''), 'Not read: add the credit policy')}
+  ${card('api', true, 'Vendors and APIs', ADM.disc.read.VEN ? 'From your vendor list. Confirm them' : 'A recommended setup to confirm', '')}
+  ${card('org', !!(G && (G.roles.length || G.esc.length)), 'Onboarding', G ? plural(G.roles.length, 'role') + ', ' + plural(G.sops.length, 'SOP') + ', ' + plural(G.esc.length, 'escalation') : '', 'Not set up: add the role master or the escalation matrix')}</div></section>`;
+}
+function discBuild(att, txt) {
+  const O = ADM.onb, D = ADM.disc, proc = att.filter(k => ['S1', 'S2', 'S3', 'S4'].includes(k)), has = k => att.includes(k);
+  D.read = {}; att.forEach(k => { D.read[k] = 1; });
+  if (proc.length || txt) {
+    O.wf = buildFlow(proc, txt, false); O.phase = 'done'; ADM.sel = null; const fs = flowStats(O.wf);
+    alog2({ area: 'wf', what: 'Built the workflow from ' + plural(proc.length + (txt ? 1 : 0), 'source'), a: plural(fs.steps, 'step') + ', ' + plural(fs.decs, 'decision') + ', ' + plural(fs.stages, 'stage'), why: 'Discovery', src: listAnd(proc.map(k => WSRC[k].n).concat(txt ? ['typed text'] : [])) });
+  }
+  if (has('POL')) { O.polOn = 1; O.pol = deep(POL12); O.loc = {}; PRULES.forEach(r => { if (!r.p && r.u !== 'grid' && r.u !== 'rbi') O.loc[r.id] = r.v; }); O.polPhase = 'done'; alog2({ area: 'pol', what: 'Read the credit policy', a: plural(PRULES.length, 'rule') + ' with ' + polLimits() + ' limits', why: 'Discovery', src: PDOC.n }); }
+  const fsrc = ['AF', 'DC', 'SC'].filter(has);
+  if (fsrc.length) { ADM.fm.onb = deep(FORMN); alog2({ area: 'form', what: 'Drafted the new lead form and the login documents', a: plural(FORMN.lead.fields.length, 'field') + ', ' + plural(FORMN.login.docs.length, 'login document'), why: 'Discovery', src: listAnd(fsrc.map(k => DSRC[k].n)) }); }
+  if (has('RMX') || has('ESC') || (has('S1') && O.wf)) {
+    ADM.org.onb = orgBuild(O.wf, { roles: has('RMX'), sops: has('S1') && !!O.wf, esc: has('ESC') }); ADM.org.onbSrc = { RMX: has('RMX'), ESC: has('ESC'), S1: has('S1') };
+    const G = ADM.org.onb; alog2({ area: 'org', what: 'Set up the roles, SOPs and escalations', a: plural(G.roles.length, 'role') + ', ' + plural(G.sops.length, 'SOP') + ', ' + plural(G.esc.length, 'escalation'), why: 'Discovery', src: listAnd(['RMX', 'ESC', 'S1'].filter(has).map(k => dsrc(k).n)) });
+  }
+  alog2({ area: 'disc', what: 'Read ' + plural(att.length + (txt ? 1 : 0), 'source'), a: listAnd(att.map(k => dsrc(k).n).concat(txt ? ['typed text'] : [])), why: 'New setup' });
+}
+
+/* ---------------- shared bits ---------------- */
+function emptyHTML2(ico, h, p, acts) { return `<section class="panel emp11"><div class="pb">${ic(ico)}<div><h3>${esc(h)}</h3><p>${esc(p)}</p><div class="emp-a">${acts.map(([a, v, l, pri]) => `<button class="btn ${pri ? 'btn-p' : 'btn-s'} btn-sm" data-act="${a}" data-v="${esc(v)}">${esc(l)}</button>`).join('')}</div></div></div></section>`; }
+const runDisc = () => runHTML(ADM.disc.steps, ADM.disc.step, 'Reading what you added');
+
+/* ---------------- 2. Workflow: drawn from what Discovery read ---------------- */
+capAtt = function () { const D = ADM.disc, src = D && D.phase === 'done' ? D.read : ADM.onb.src; return ['S1', 'S2', 'S3', 'S4'].filter(k => src[k]); };
+const _wfSecHTML11 = wfSecHTML;
+wfSecHTML = function () {
+  if (ONB() && ADM.disc.phase === 'run') return runDisc();
+  if (ONB() && !ADM.onb.wf) return emptyHTML2('route', 'No workflow yet', 'Add how the work is done in Discovery: the SOP, a recorded walkthrough or a few lines in your own words. Uncia draws the workflow from it, with what moves a file on from every step.', [['asec', 'disc', 'Go to Discovery', 1]]);
+  return _wfSecHTML11();
+};
+
+/* ---------------- drafts in the live setup: forms and onboarding too ---------------- */
+function fmDiff(A, B) {
+  const D = []; if (!A || !B) return D;
+  [['lead', 'fields'], ['lead', 'docs'], ['login', 'docs'], ['login', 'codocs']].forEach(([f, l]) => {
+    const a = A[f][l] || [], b = B[f][l] || [], ak = a.map(x => x.k), bk = b.map(x => x.k), lb = it => fmLbl(f, l, it), w = l === 'fields' ? 'field' : 'document', nm = fmNm(f, l), id = k => f + '|' + l + '|' + k, rq = x => x.req ? 'Required' : 'Optional';
+    b.forEach(it => { const o = a.find(x => x.k === it.k);
+      if (!o) { D.push({ id: id(it.k), k: 'add', t: nm + ': added the ' + w + ' “' + lb(it) + '”', b: '', a: rq(it) }); return; }
+      if (!!o.req !== !!it.req) D.push({ id: id(it.k), k: 'chg', t: nm + ': “' + lb(it) + '”', b: rq(o), a: rq(it) });
+      if ((o.l || '') !== (it.l || '')) D.push({ id: id(it.k), k: 'chg', t: nm + ': renamed a ' + w, b: lb(o), a: lb(it) }); });
+    a.forEach(it => { if (!bk.includes(it.k)) D.push({ id: id(it.k), k: 'del', t: nm + ': removed the ' + w + ' “' + lb(it) + '”', b: rq(it), a: 'Removed' }); });
+    const x = ak.filter(k => bk.includes(k)), y = bk.filter(k => ak.includes(k));
+    if (x.join() !== y.join()) D.push({ id: id(':ord'), k: 'chg', t: nm + ': changed the order of the ' + w + 's' });
+  });
+  const fa = A.login.fee, fb = B.login.fee;
+  if (fa.on !== fb.on || (fb.on && fa.amt !== fb.amt)) D.push({ id: 'login|fee', k: 'chg', t: 'Login documents: application fee', b: feeStr(fa), a: feeStr(fb) });
+  if (fa.on && fb.on && !!fa.adj !== !!fb.adj) D.push({ id: 'login|fee', k: 'chg', t: 'Login documents: application fee adjusted against the processing fee', b: fa.adj ? 'Yes' : 'No', a: fb.adj ? 'Yes' : 'No' });
+  const ca = A.login.cofg, cb = B.login.cofg;
+  if (ca && cb && (ca.on !== cb.on || (cb.on && ca.max !== cb.max))) D.push({ id: 'login|cofg', k: 'chg', t: 'Login documents: co-applicants at login', b: coStr(ca), a: coStr(cb) });
+  return D;
+}
+const feeStr = f => f.on ? inr(f.amt) + ', with GST' : 'Not collected';
+const orgRN = (G, id) => { const r = G && G.roles.find(x => x.id === id); return r ? r.n : ROLEN(id); };
+const escStr = (G, e) => e.lv.length ? e.lv.map(l => orgRN(G, l.r) + ' after ' + afterTxt(l)).join('; ') : 'No one';
+function orgDiff(A, B) {
+  const D = []; if (!A || !B) return D;
+  B.roles.forEach(r => { const o = A.roles.find(x => x.id === r.id), id = 'role|' + r.id;
+    if (!o) { D.push({ id, k: 'add', t: 'Added the role “' + r.n + '”', b: '', a: r.ppl.length ? listAnd(r.ppl.map(p => p.split(',')[0])) : 'No one yet' }); return; }
+    if (o.n !== r.n) D.push({ id, k: 'chg', t: 'Renamed a role', b: o.n, a: r.n });
+    r.ppl.filter(p => !o.ppl.includes(p)).forEach(p => D.push({ id, k: 'chg', t: r.n + ': added a person', b: '', a: p }));
+    o.ppl.filter(p => !r.ppl.includes(p)).forEach(p => D.push({ id, k: 'chg', t: r.n + ': removed a person', b: p, a: 'Removed' }));
+    if (o.resp.join('\n') !== r.resp.join('\n')) D.push({ id, k: 'chg', t: r.n + ': responsibilities', b: plural(o.resp.length, 'line'), a: plural(r.resp.length, 'line') });
+    if (o.acc !== r.acc) D.push({ id, k: 'chg', t: r.n + ': access', b: o.acc, a: r.acc }); });
+  A.roles.forEach(r => { if (!B.roles.some(x => x.id === r.id)) D.push({ id: 'role|' + r.id, k: 'del', t: 'Removed the role “' + r.n + '”', b: '', a: 'Removed' }); });
+  B.sops.forEach(s => { const o = A.sops.find(x => x.id === s.id) || { steps: [] }, nm = orgRN(B, s.id) + ' SOP', id = 'sop|' + s.id;
+    s.steps.forEach(st => { const m = o.steps.find(x => x.id === st.id);
+      if (!m) { D.push({ id, k: 'add', t: nm + ': added a step', b: '', a: st.t + ' (' + st.sla + ')' }); return; }
+      if (m.t !== st.t) D.push({ id, k: 'chg', t: nm + ': changed a step', b: m.t, a: st.t });
+      if (m.sla !== st.sla) D.push({ id, k: 'chg', t: nm + ': turnaround of “' + short(st.t, 44) + '”', b: m.sla, a: st.sla }); });
+    o.steps.forEach(st => { if (!s.steps.some(x => x.id === st.id)) D.push({ id, k: 'del', t: nm + ': removed a step', b: st.t, a: 'Removed' }); }); });
+  A.sops.forEach(s => { if (!B.sops.some(x => x.id === s.id)) D.push({ id: 'sop|' + s.id, k: 'del', t: orgRN(A, s.id) + ' SOP: removed', b: plural(s.steps.length, 'step'), a: 'Removed' }); });
+  B.esc.forEach(e => { const o = A.esc.find(x => x.id === e.id), id = 'esc|' + e.id;
+    if (!o) { D.push({ id, k: 'add', t: 'Added an escalation: ' + e.t, b: '', a: escStr(B, e) }); return; }
+    if (o.t !== e.t) D.push({ id, k: 'chg', t: 'Renamed an escalation', b: o.t, a: e.t });
+    if (escStr(A, o) !== escStr(B, e)) D.push({ id, k: 'chg', t: 'Escalation: ' + short(e.t, 60), b: escStr(A, o), a: escStr(B, e) }); });
+  A.esc.forEach(e => { if (!B.esc.some(x => x.id === e.id)) D.push({ id: 'esc|' + e.id, k: 'del', t: 'Removed an escalation: ' + e.t, b: escStr(A, e), a: 'Removed' }); });
+  return D;
+}
+staged = function () {
+  if (!ADM || ONB()) return { pol: [], api: [], wf: [], form: [], org: [], n: 0 };
+  const pol = polDiffs(), api = apiDiffs(), wf = flowDiff(ADM.live.wf, ADM.live.wfW), form = fmDiff(ADM.fm.live, ADM.fm.liveW), org = orgDiff(ADM.org.live, ADM.org.liveW);
+  return { pol, api, wf, form, org, n: pol.length + api.length + wf.length + form.length + org.length };
+};
+saveBarHTML = function (st) {
+  const parts = [['wf', st.wf.length], ['form', st.form.length], ['pol', st.pol.length], ['api', st.api.length], ['org', st.org.length]].filter(x => x[1]).map(([k, n]) => AREA[k] + ' ' + n).join(', ');
+  const list = st.wf.map(d => ['wf', d.t, d.b, d.a]).concat(st.form.map(d => ['form', d.t, d.b, d.a]), st.pol.map(d => ['pol', d.l, d.fb, d.fa]), st.api.map(d => ['api', d.t, d.b, d.a]), st.org.map(d => ['org', d.t, d.b, d.a]));
+  return `<div class="sbar6">${ADM.showCh ? `<ul class="sb-l">${list.map(([k, t, b, a]) => `<li><span class="ar6 ${k}">${AREA[k]}</span><span>${esc(t)}${b || a ? `: ${b ? `<s>${esc(b)}</s> ${ic('fwd')} ` : ''}<b>${esc(a || '')}</b>` : ''}</span></li>`).join('')}</ul>` : ''}
+  <div class="sb-r"><button class="sb-n" data-act="ashow" aria-expanded="${!!ADM.showCh}"><b>${plural(st.n, 'unsaved change')}</b><small>${esc(parts)}. ${ADM.showCh ? 'Hide' : 'See'} them</small></button><input class="inp2${ADM.needWhy ? ' bad' : ''}" id="admWhy" placeholder="Reason, for the audit trail (required)" value="${esc(ADM.why)}" aria-label="Reason for the change"><button class="btn btn-s" data-act="adiscard">Discard</button><button class="btn btn-p" data-act="asave">${ic('check')}Save and apply</button></div></div>`;
+};
+const FMNEXT = 'Tuesday 17 November 2026, at 8:00';
+const _adiscard11 = ACT.adiscard, _amode11 = ACT.amode, _opsrc11 = ACT.opsrc, _resetall11 = ACT.resetall, _asec11 = ACT.asec;
+Object.assign(ACT, {
+  adiscard() { if (ADM && ADM.fm) { ADM.fm.liveW = deep(ADM.fm.live); ADM.org.liveW = deep(ADM.org.live); ADM.oed = null; Object.values(ADM.tk).forEach(t => { t.added = ''; }); } _adiscard11(); },
+  amode(v) { TKP.stop(); if (ADM) ADM.oed = null; _amode11(v); },
+  opsrc() { _opsrc11(); ADM.onb.src.POL = ADM.onb.polOn ? 1 : 0; },
+  orebuild() { ADM.sec = 'disc'; ADM.sel = null; render(); },
+  asave() {
+    const st = staged(), why = (ADM.why || '').trim(); if (!st.n) return;
+    if (!why) { ADM.needWhy = 1; render(); const el = $('#admWhy'); if (el) el.focus(); toast('Add a reason first, for the audit trail'); return; }
+    const at = tick(2), src = ADM.src || '', srcK = ADM.srcK || '';
+    const pp = st.pol.filter(d => d.p);
+    if (pp.length) { const p = deep(POL); pp.forEach(d => setP(p, d.p, d.to)); p.ver = POL.ver + 1; p.at = at; p.maker = ADMIN.name; p.checker = null; p.note = 'Changed on the Admin page: ' + pp.map(d => d.l + ', ' + d.fb + ' to ' + d.fa).join('; ') + '. Reason: ' + why; POL = p; VERS.unshift(deep(p)); }
+    st.pol.forEach(d => { if (d.id) ADM.loc[d.id] = d.to; alog2({ at, area: 'pol', what: d.l, b: d.fb, a: d.fa, why, src, srcK }); });
+    st.api.forEach(d => { const a = ADM.live.api.find(x => x.id === d.id); a[d.f] = ADM.ae[d.id][d.f]; alog2({ at, area: 'api', what: d.t, b: d.b, a: d.a, why, src, srcK }); });
+    if (st.wf.length) { ADM.live.wf = deep(ADM.live.wfW); ADM.live.ver = (parseFloat(ADM.live.ver) + 0.1).toFixed(1); st.wf.forEach(d => alog2({ at, area: 'wf', what: d.t, b: d.b, a: d.a, why, src, srcK })); }
+    if (st.form.length) { ADM.fm.live = deep(ADM.fm.liveW); if (!ADM.fm.sched) ADM.fm.prev = ADM.fm.ver; ADM.fm.ver = (parseFloat(ADM.fm.ver) + 0.1).toFixed(1); ADM.fm.sched = FMNEXT; st.form.forEach(d => alog2({ at, area: 'form', what: d.t, b: d.b, a: d.a, why: why + '. Live from ' + FMNEXT, src, srcK })); }
+    if (st.org.length) { ADM.org.live = deep(ADM.org.liveW); st.org.forEach(d => alog2({ at, area: 'org', what: d.t, b: d.b, a: d.a, why, src, srcK })); }
+    ADM.pe = {}; ADM.le = {}; ADM.ae = {}; ADM.why = ''; ADM.src = ''; ADM.srcK = ''; ADM.needWhy = 0; ADM.showCh = 0; ADM.ik.added = ''; ADM.oed = null; Object.values(ADM.tk).forEach(t => { t.added = ''; });
+    render(); toast(plural(st.n, 'change') + ' applied and logged' + (pp.length ? '. Policy version ' + POL.ver + ' is live' : '') + (st.form.length ? '. The forms change on ' + FMNEXT.replace(', at', ' at') : ''));
+  }
+});
+
+/* ---------------- audit trail: every section ---------------- */
+audSecHTML = function () {
+  const F = [['all', 'All'], ['disc', 'Discovery'], ['wf', 'Workflow'], ['form', 'Form design'], ['pol', 'Policy rules'], ['api', 'Vendors and APIs'], ['org', 'Onboarding']], ok = verifyAud();
+  const L = ADM.aud.filter(e => e.view === ADM.mode && (ADM.af === 'all' || e.area === ADM.af)).slice().reverse();
+  return `<div class="aud-top"><div class="aud-f">${F.map(([k, l]) => `<button class="flt${ADM.af === k ? ' on' : ''}" data-act="aaf" data-v="${k}">${l}</button>`).join('')}</div><span class="nav-sp"></span><button class="btn btn-s btn-sm" data-act="averify">${ic('shield')}Check the trail</button><button class="btn btn-s btn-sm" data-act="aexport">${ic('down')}Export as CSV</button></div>
+  <div class="chain6 ${ok ? 'ok' : 'bad'}">${ic(ok ? 'link' : 'alert')}<span>${ok ? 'Intact: ' + plural(ADM.aud.length, 'entry', 'entries') + ' across both views, each carrying the hash of the one before it.' : 'Broken: an entry was changed.'} Entries cannot be edited or deleted, including by administrators.</span></div>
+  <section class="panel"><div class="pb aud-w"><table class="aud6"><thead><tr><th>When</th><th>Who</th><th>Area</th><th>What changed</th><th>Reason or source</th></tr></thead><tbody>${L.map(e => `<tr><td class="nw">${esc(fds(e.at))}<small>${esc(ftime(e.at))}</small></td><td><b>${esc(e.who)}</b><small>${esc(e.role)}</small></td><td><span class="ar6 ${e.area}">${esc(AREA[e.area])}</span></td><td><b>${esc(e.what)}</b>${e.b || e.a ? `<small>${e.b ? `<s>${esc(e.b)}</s> ${ic('fwd')} ` : ''}${esc(e.a || '')}</small>` : ''}</td><td>${esc(e.why || '')}${e.src ? `<small>${ic(SRCIC[e.srcK] || 'file')}${esc(e.src)}</small>` : ''}</td></tr>`).join('') || `<tr><td colspan="5" class="muted">Nothing logged ${ONB() ? 'in the new setup ' : ''}yet.</td></tr>`}</tbody></table></div></section>`;
+};
+/* vendors read from the lender's own list */
+const _apiSecHTML11 = apiSecHTML;
+apiSecHTML = function () { const h = _apiSecHTML11(); return ONB() && ADM.disc.read.VEN ? h.replace('A recommended setup to start from. For each call, pick the first-choice vendor and the one to switch to if it fails.', 'Read from your vendor list: the first-choice vendor for each call, and the one to switch to if it fails. Check them and confirm.') : h; };
+
+/* ---------------- 3. Form design ---------------- */
+function fdList(F) {
+  if (!F) return [{ id: 'g1', n: 'Lead', items: [{ id: 'T1', n: XT[0].n, r: 'rm', sla: XT[0].sla, trg: { k: 'auto', t: TRG.T1[1] }, scr: 'lead', d: 0 }] }, { id: 'g2', n: 'Login', items: [{ id: 'T3', n: XT[2].n, r: 'bops', sla: XT[2].sla, trg: { k: 'auto', t: TRG.T3[1] }, scr: 'login', d: 0 }] }];
+  const pref = { lead: findNode(F, 'T1') ? 'T1' : '', login: findNode(F, 'T3') ? 'T3' : '' }, seen = {};
+  return F.stages.map(g => {
+    const items = [];
+    const add = (it, d, arm) => {
+      let scr = FSCR[it.id] || (g.id === 'g1' && /\blead\b/i.test(it.n) ? 'lead' : g.id === 'g2' && /log ?in/i.test(it.n) ? 'login' : null);
+      if (scr && ((pref[scr] && pref[scr] !== it.id) || seen[scr])) scr = null; if (scr) seen[scr] = 1;
+      items.push({ id: it.id, n: it.n, r: it.r, sla: it.sla, trg: trgOf(it), scr, d, arm }); };
+    const w = (arr, d, arm) => arr.forEach(it => { if (it.t === 'step') add(it, d, arm); else if (it.t === 'dec') { items.push({ dec: 1, n: it.q, d }); it.arms.forEach(a => w(a.items, d + 1, a.l)); } else if (it.t === 'par') { items.push({ dec: 1, par: 1, n: 'At the same time', d }); w(it.lanes, d + 1, ''); } });
+    w(g.items, 0, '');
+    return { id: g.id, n: g.n, items };
+  });
+}
+function fdDm() { const dm = {}; if (!ONB()) fmDiff(ADM.fm.live, ADM.fm.liveW).forEach(d => { if (!dm[d.id] || d.k === 'add') dm[d.id] = d.k; }); return dm; }
+const isHi = id => (ADM.fmHi || []).includes(id);
+const dTag = st => st ? `<span class="wf-tag ${st === 'add' ? 'add' : 'chg'}">${st === 'add' ? 'New' : 'Changed'}</span>` : '';
+function formSecHTML() {
+  const onb = ONB();
+  if (onb && ADM.disc.phase === 'run') return runDisc();
+  const fm = FM();
+  const head = `<div class="fd-hd"><div class="cap6-h"><h3>Form design</h3><p>Pick a step in the workflow to see the screen it shows. The new lead form and the login documents can be changed: drag fields and documents into place, switch them between required and optional, or tell Uncia what to change by voice note or in a few words.</p></div>${onb ? '' : `<div class="fd-ver">${ic('layers')}<span><b>Forms version ${esc(ADM.fm.ver)}</b><small>${ADM.fm.sched ? 'Goes live on ' + esc(ADM.fm.sched) + '. Until then the screens show version ' + esc(ADM.fm.prev) : 'Live since 1 Apr 2026. Saved changes reach the screens at 8:00 on the next working day, so no form changes while someone is filling it in'}</small></span></div>`}</div>`;
+  if (!fm) return head + emptyHTML2('screen', 'No forms yet', 'Add your application form, document checklist or schedule of charges in Discovery, and Uncia drafts the new lead form and the login documents from them. Or start from the standard home loan forms and change them here.', [['fmstd', '', 'Start from the standard forms', 1], ['asec', 'disc', 'Go to Discovery']]);
+  const L = fdList(curFlow()), all = [].concat(...L.map(g => g.items.filter(x => !x.dec)));
+  let sel = all.find(x => x.id === ADM.fsel); if (!sel) { sel = all.find(x => x.scr === 'lead') || all[0]; ADM.fsel = sel ? sel.id : null; }
+  const row = x => x.dec ? `<li class="fd-dq" style="--d:${x.d}">${ic(x.par ? 'lanes' : 'dia')}<span>${esc(x.n)}</span></li>`
+    : `<li style="--d:${x.d}"><button class="fd-s${sel && x.id === sel.id ? ' on' : ''}${x.scr ? ' scr' : ''}${x.r === 'sys' ? ' sys' : ''}" data-act="fmsel" data-v="${x.id}"${sel && x.id === sel.id ? ' aria-current="true"' : ''}>${ic(x.scr ? 'screen' : x.r === 'sys' ? 'cpu' : 'user')}<span><b>${x.arm ? esc(x.arm) + ': ' : ''}${esc(short(x.n, 72))}</b><small>${x.r === 'sys' ? 'Runs by itself' : esc(rn(x.r)) + (x.sla && x.sla.u !== 'auto' ? ', ' + esc(lc1(slaTxt(x.sla))) : '')}</small>${x.scr ? `<i class="fd-ed">${ic('pen')}A screen you can change</i>` : ''}</span></button></li>`;
+  const right = `<aside class="fd-r" aria-label="Workflow"><div class="fd-rh"><b>Workflow</b><small>${onb ? (ADM.onb.wf ? 'The new setup' : 'Build the workflow in Discovery to see every step') : 'Version ' + esc(ADM.live.ver)}</small></div><ol class="fd-wf">${L.map((g, i) => `<li class="fd-g"><span class="fd-gi">${i + 1}</span><b>${esc(g.n)}</b></li>${g.items.map(row).join('') || '<li class="fd-none">No steps yet</li>'}`).join('')}</ol></aside>`;
+  const left = !sel ? '' : sel.scr ? fdEdit(sel, fm) : fdView(sel);
+  return head + `<div class="fd11"><div class="fd-lc">${left}</div>${right}</div>`;
+}
+function fdHead(sel) {
+  const t = sel.trg, who = sel.r === 'sys' ? '' : rn(sel.r);
+  return `<div class="fd-ph"><span class="fd-who">${ic(sel.r === 'sys' ? 'cpu' : 'screen')}${sel.r === 'sys' ? 'Runs by itself' : 'What ' + esc(who) + ' sees'}</span><b>${esc(sel.n)}</b><span class="fd-mv">${ic(t.k === 'auto' ? 'zap' : 'user')}Moves on ${esc(lc1(t.t))}</span></div>`;
+}
+function fdEdit(sel, fm) {
+  const form = sel.scr, dm = fdDm();
+  return fdHead(sel) + tkHTML(form) + `<div class="fd-wr"><div class="fd-mk">${form === 'lead' ? mkLead(fm.lead, dm) : mkLogin(fm.login, dm)}</div>${fdPal(form, fm)}</div>`;
+}
+function fdView(sel) {
+  if (sel.r === 'sys') return fdHead(sel) + `<div class="mk mk-sys"><div class="mk-b">${ic('cpu')}<div><b>No screen for this step</b><p>The system does it by itself: ${esc(lc1(sel.n))}. Nobody fills anything in, and the file moves on ${esc(lc1(sel.trg.t))}.</p><p>What it uses is set in Policy rules and in Vendors and APIs.</p></div></div></div>`;
+  const who = rn(sel.r);
+  return fdHead(sel) + `<div class="mk mk-ro"><div class="mk-h"><div><b>${esc(short(sel.n, 90))}</b><small>${esc(who)}${sel.sla ? ', ' + esc(lc1(slaTxt(sel.sla))) : ''}</small></div></div>
+  <div class="mk-b"><dl class="mk-dl"><dt>The file</dt><dd>Sameer Joshi, ₹55 lakh home loan over 20 years</dd><dt>To do</dt><dd>${esc(sel.n)}</dd><dt>Turnaround</dt><dd>${esc(slaTxt(sel.sla))}</dd><dt>Then</dt><dd>The file moves on ${esc(lc1(sel.trg.t))}</dd></dl>
+  <p class="mk-ro-n">${ic('info')}This step uses the standard ${esc(lc1(who))} screen: the file, its documents and the checks for the step, with a button to mark it done. The new lead form and the login documents are the screens set up here.</p></div>
+  <div class="mk-ft"><span class="mk-btn">Add a note</span><span class="mk-btn p">${ic('check')}Mark as done</span></div></div>`;
+}
+function mkField(f, dm) {
+  const d = FLIB[f.k] || [f.k, ''], lbl = fmLbl('lead', 'fields', f), id = 'lead|fields|' + f.k, st = dm[id];
+  return `<div class="mk-fd${st ? ' d-' + st : ''}${isHi(id) ? ' hi' : ''}" draggable="true" data-dk="mv|${id}"${f.src ? ` title="From ${esc(dsrc(f.src).n)}"` : ''}>${dTag(st)}
+  <div class="mk-fl"><span class="mk-grip" aria-hidden="true">${ic('grip')}</span><span class="mk-lb">${esc(lbl)}${f.req ? '<i class="mk-st">*</i>' : ''}</span>${d[2] ? `<span class="mk-lk" title="Always required: the consent SMS goes to this number">${ic('lock')}</span>` : `<button class="mk-tg${f.req ? ' on' : ''}" data-act="fmreq" data-v="${id}" aria-pressed="${!!f.req}" title="${f.req ? 'Make it optional' : 'Make it required'}">${f.req ? 'Required' : 'Optional'}</button><button class="mk-x" data-act="fmdel" data-v="${id}" aria-label="Remove ${esc(lbl)}" title="Remove">${ic('x')}</button>`}</div>
+  <span class="mk-in${d[3] ? ' sel' : ''}">${esc(d[1] || ' ')}${d[3] ? ic('chev') : ''}</span></div>`;
+}
+function mkDoc(form, d, dm, list) {
+  list = list || 'docs';
+  const def = fdef(form, list)[d.k] || [d.k, ''], lbl = fmLbl(form, list, d), id = form + '|' + list + '|' + d.k, st = dm[id], lock = form === 'login' && list === 'docs' && d.k === 'app';
+  const sub = list === 'codocs' ? (def[1] === 'Every co-applicant' ? def[1] : 'When: ' + def[1]) : form === 'login' ? (def[1] === 'All' ? 'Every file' : 'When: ' + def[1]) : def[1];
+  return `<div class="mk-dc${st ? ' d-' + st : ''}${isHi(id) ? ' hi' : ''}" draggable="true" data-dk="mv|${id}"${d.src ? ` title="From ${esc(dsrc(d.src).n)}"` : ''}>${dTag(st)}<span class="mk-grip" aria-hidden="true">${ic('grip')}</span>${ic('file')}<span class="mk-dt"><b>${esc(lbl)}${d.req ? '<i class="mk-st">*</i>' : ''}</b><small>${esc(sub)}</small></span>
+  ${lock ? `<span class="mk-lk" title="Always required: a file cannot log in without it">${ic('lock')}</span>` : `<button class="mk-tg${d.req ? ' on' : ''}" data-act="fmreq" data-v="${id}" aria-pressed="${!!d.req}" title="${d.req ? 'Make it optional' : 'Make it required'}">${d.req ? 'Required' : 'Optional'}</button><button class="mk-x" data-act="fmdel" data-v="${id}" aria-label="Remove ${esc(lbl)}" title="Remove">${ic('x')}</button>`}${form === 'login' && list === 'docs' ? `<span class="mk-btn sm">${ic('upload')}Upload</span>` : ''}</div>`;
+}
+function mkCo(G, dm) {
+  const co = G.cofg || { on: 0, max: 3 }, D = G.codocs || [], st = dm['login|cofg'];
+  return `<div class="mk-co${co.on ? ' on' : ''}${st ? ' d-chg' : ''}${isHi('login|cofg') ? ' hi' : ''}">${dTag(st)}<div class="mk-fh">${ic('users')}<span><b>Co-applicants</b><small>${co.on ? 'The RM can add up to ' + plural(co.max, 'co-applicant') + ' at login. Each gets their own consent SMS and upload link' : 'Not added at login'}</small></span><label class="tgl6"><input type="checkbox" data-fm="coon"${co.on ? ' checked' : ''} aria-label="Co-applicants can be added at login"><span></span></label></div>
+  ${co.on ? `<div class="mk-fr"><label class="mk-amt"><span>Most on a file</span><select class="sel mk-max" data-fm="comax" aria-label="Most co-applicants on a file">${[1, 2, 3, 4].map(n => `<option value="${n}"${n === co.max ? ' selected' : ''}>${plural(n, 'co-applicant')}</option>`).join('')}</select></label><span class="mk-btn">${ic('userplus')}Add a co-applicant</span></div>
+  <div class="mk-ch2"><b>Documents asked from each co-applicant</b><small>${D.filter(d => d.req).length} required. Income documents only when they earn</small></div>
+  <div class="mk-codocs" data-dz="login|codocs">${D.map(d => mkDoc('login', d, dm, 'codocs')).join('') || '<p class="mk-empty">Drag documents here</p>'}</div>` : ''}</div>`;
+}
+function mkLead(L, dm) {
+  const req = L.fields.filter(f => f.req).map(f => lc1(fmLbl('lead', 'fields', f)));
+  const rt = req.length === 1 && req[0] === 'contact number' ? 'Only the contact number is needed.' : req.length ? 'Needed: ' + listAnd(req) + '.' : 'Nothing is required.';
+  return `<div class="mk" aria-label="New lead form"><div class="mk-h"><div><b>New lead</b><small>Amit Joshi, Pune Kothrud branch</small></div><span class="mk-xx" aria-hidden="true">${ic('x')}</span></div>
+  <div class="mk-b"><div class="mk-sec"><b>Applicant</b><small>${esc(rt)} Upload the documents and the details fill themselves.</small></div>
+  <div class="mk-grid" data-dz="lead|fields">${L.fields.map(f => mkField(f, dm)).join('') || '<p class="mk-empty">Drag fields here</p>'}</div>
+  <div class="mk-sec"><b>Documents</b><small>${L.docs.length ? plural(L.docs.length, 'document') + ' asked for' + (L.docs.some(d => d.req) ? '' : ', all optional at the lead') : 'None asked for at the lead'}</small></div>
+  <div class="mk-docs" data-dz="lead|docs">${L.docs.map(d => mkDoc('lead', d, dm)).join('') || '<p class="mk-empty">Drag documents here</p>'}</div>
+  <div class="mk-cons">${ic('lock')}<span><b>Credit consent.</b> An SMS asks the customer to approve a credit report pull, which records an enquiry, and 12 months of bank data through the Account Aggregator.</span><i>Always asked</i></div></div>
+  <div class="mk-ft"><span class="mk-btn">Cancel</span><span class="mk-btn p">${ic('send')}Send consent request</span></div></div>`;
+}
+function mkLogin(G, dm) {
+  const cats = [0, 1, 2, 3, 4].map(i => [i, G.docs.filter(d => (GDOC[d.k] || [])[2] === i)]).filter(x => x[1].length), fee = G.fee, fst = dm['login|fee'];
+  return `<div class="mk" aria-label="Login documents"><div class="mk-h"><div><b>Documents due</b><small>${plural(G.docs.length, 'document')} on the list, ${G.docs.filter(d => d.req).length} required. The customer gets an upload link; the RM can upload them here too</small></div><span class="mk-btn">${ic('upload')}Upload documents</span></div>
+  <div class="mk-b"><div class="mk-cats" data-dz="login|docs">${cats.map(([i, D]) => `<div class="mk-cat"><div class="mk-ch"><b>${esc(DCAT[i])}</b><small>${D.length} on the list</small></div>${D.map(d => mkDoc('login', d, dm)).join('')}</div>`).join('') || '<p class="mk-empty">Drag documents here</p>'}</div>
+  ${mkCo(G, dm)}<div class="mk-fee${fee.on ? ' on' : ''}${fst ? ' d-chg' : ''}${isHi('login|fee') ? ' hi' : ''}">${dTag(fst)}<div class="mk-fh">${ic('bank')}<span><b>Application fee</b><small>${fee.on ? 'Paid by the customer at login, by UPI, card or net banking' : 'Not collected. Files log in without a fee'}</small></span><label class="tgl6"><input type="checkbox" data-fm="on"${fee.on ? ' checked' : ''} aria-label="Collect an application fee"><span></span></label></div>
+  ${fee.on ? `<div class="mk-fr"><label class="mk-amt"><span>Amount, with GST</span><span class="mk-ai">₹<input class="pin6" type="number" min="0" step="10" data-fm="amt" value="${fee.amt}" aria-label="Application fee, with GST"></span></label><label class="mk-adj"><input type="checkbox" data-fm="adj"${fee.adj ? ' checked' : ''}><span>Adjusted against the processing fee at disbursement</span></label></div>` : ''}</div></div>
+  <div class="mk-ft"><span class="mk-note">${ic('zap')}Goes to the login check once the required documents${fee.on ? ' and the fee' : ''} are in</span><span class="mk-btn p">Log in the file</span></div></div>`;
+}
+function fdPal(form, fm) {
+  const grp = (list, title) => { const have = fm[form][list].map(x => x.k), defs = fdef(form, list), keys = Object.keys(defs).filter(k => !have.includes(k));
+    return `<div class="fd-pg"><b>${title}</b><div class="fd-chips" data-dz="${form}|${list}|pal">${keys.map(k => `<button class="fd-chip" draggable="true" data-dk="add|${form}|${list}|${k}" data-act="fmadd" data-v="${form}|${list}|${k}" title="Drag onto the form, or click to add it at the end">${ic('plus')}${esc(defs[k][0])}</button>`).join('') || '<span class="fd-all">All of them are on the form</span>'}</div></div>`; };
+  return `<aside class="fd-pal" aria-label="Add to the form"><div class="fd-pk">Add to the form</div><p>Drag onto the form, or click to add at the end. Drag an item back here to remove it.</p>${form === 'lead' ? grp('fields', 'Fields') : ''}${grp('docs', 'Documents')}${form === 'login' && fm.login.cofg && fm.login.cofg.on ? grp('codocs', 'Co-applicant documents') : ''}</aside>`;
+}
+
+/* form changes: one function for clicks, drags, voice notes and text */
+function fmDesc(op, F) {
+  if (op.k === 'fee') { const f = F.login.fee, n = Object.assign({}, f, op.v); return Object.keys(op.v).length === 1 && 'adj' in op.v ? { t: 'Login documents: application fee adjusted against the processing fee', b: f.adj ? 'Yes' : 'No', a: n.adj ? 'Yes' : 'No' } : { t: 'Login documents: application fee', b: feeStr(f), a: feeStr(n) }; }
+  if (op.k === 'cofg') { const f = F.login.cofg, n = Object.assign({}, f, op.v); return { t: 'Login documents: co-applicants at login', b: coStr(f), a: coStr(n) }; }
+  const nm = fmNm(op.form, op.list), arr = F[op.form][op.list], it = arr.find(x => x.k === op.key), w = op.list === 'fields' ? 'field' : 'document', lb = x => fmLbl(op.form, op.list, x), me = lb(it || { k: op.key });
+  const pos = (a, k) => { const j = a.findIndex(x => x.k === k); return j <= 0 ? 'First' : 'After “' + lb(a[j - 1]) + '”'; };
+  if (op.k === 'req') return { t: nm + ': “' + me + '”', b: it && it.req ? 'Required' : 'Optional', a: op.v ? 'Required' : 'Optional' };
+  if (op.k === 'del') return { t: nm + ': removed the ' + w + ' “' + me + '”', b: it && it.req ? 'Required' : 'Optional', a: 'Removed' };
+  if (op.k === 'ren') return { t: nm + ': renamed a ' + w, b: me, a: op.v };
+  const nx = arr.slice(); fmApply(op, { [op.form]: { [op.list]: nx } });
+  if (op.k === 'add') return { t: nm + ': added the ' + w + ' “' + me + '”', b: '', a: (op.at == null || op.at >= arr.length ? 'At the end' : pos(nx, op.key)) + ', ' + (op.v ? 'required' : 'optional') };
+  return { t: nm + ': moved the ' + w + ' “' + me + '”', b: pos(arr, op.key), a: pos(nx, op.key) };
+}
+function fmApply(op, F) {
+  if (op.k === 'fee') { Object.assign(F.login.fee, op.v); return; }
+  if (op.k === 'cofg') { Object.assign(F.login.cofg, op.v); return; }
+  const arr = F[op.form][op.list], i = arr.findIndex(x => x.k === op.key);
+  if (op.k === 'req' && i >= 0) arr[i] = Object.assign({}, arr[i], { req: op.v ? 1 : 0 });
+  if (op.k === 'del' && i >= 0) arr.splice(i, 1);
+  if (op.k === 'add' && i < 0) arr.splice(op.at == null ? arr.length : Math.max(0, Math.min(op.at, arr.length)), 0, { k: op.key, req: op.v ? 1 : 0 });
+  if (op.k === 'mv' && i >= 0) { const [x] = arr.splice(i, 1); let at = op.at == null ? arr.length : op.at; if (op.at != null && i < op.at) at--; arr.splice(Math.max(0, Math.min(at, arr.length)), 0, x); }
+  if (op.k === 'ren' && i >= 0) arr[i] = Object.assign({}, arr[i], { l: op.v });
+}
+function fmHi(ids) { ADM.fmHi = ids; clearTimeout(fmHi.t); fmHi.t = setTimeout(() => { if (ADM) ADM.fmHi = []; }, 1700); }
+function fmOp(op, why, src, srcK) {
+  const F = FM(); if (!F) return null;
+  if (op.k === 'cofg' && Object.keys(op.v).every(x => F.login.cofg[x] === op.v[x])) return null;
+  if (op.k !== 'fee' && op.k !== 'cofg') { const it = F[op.form][op.list].find(x => x.k === op.key); if (op.k === 'add' ? it : !it) return null; if (op.k === 'req' && !!it.req === !!op.v) return null; if (op.k === 'ren' && fmLbl(op.form, op.list, it) === op.v) return null; }
+  const d = fmDesc(op, F); if (op.k === 'mv' && d.b === d.a) return null;
+  fmApply(op, F);
+  if (ONB()) alog2({ area: 'form', what: d.t, b: d.b, a: d.a, why: why || 'Edited in the new setup', src: src || '', srcK: srcK || '' });
+  fmHi([op.form + '|' + (op.k === 'fee' ? 'fee' : op.k === 'cofg' ? 'cofg' : op.list + '|' + op.key)]);
+  return d;
+}
+Object.assign(ACT, {
+  fmsel(v) { ADM.fsel = v; TKP.stop(); render(); },
+  fmreq(v) { const [form, list, key] = v.split('|'), F = FM(), it = F && F[form][list].find(x => x.k === key); if (!it) return; fmOp({ k: 'req', form, list, key, v: it.req ? 0 : 1 }); render(); },
+  fmdel(v) { const [form, list, key] = v.split('|'), F = FM(), it = F && F[form][list].find(x => x.k === key); if (!it) return; fmOp({ k: 'del', form, list, key }); render(); toast('Removed “' + fmLbl(form, list, it) + '”. It is back in the list on the right'); },
+  fmadd(v) { const [form, list, key] = v.split('|'); if (!FM()) return; fmOp({ k: 'add', form, list, key, v: 0 }); render(); },
+  fmstd() { ADM.fm.onb = deep(FORM0); alog2({ area: 'form', what: 'Started from the standard forms', a: plural(FORM0.lead.fields.length, 'field') + ', ' + plural(FORM0.login.docs.length, 'login document'), why: 'New setup' }); render(); }
+});
+/* dragging fields and documents */
+function dzClear() { document.querySelectorAll('.dz-b,.dz-a,.dz-end,.dz-on').forEach(e => e.classList.remove('dz-b', 'dz-a', 'dz-end', 'dz-on')); }
+function dzTarget(ev) {
+  if (!ADM || !ADM.drag || !ev.target || !ev.target.closest) return null;
+  const z = ev.target.closest('[data-dz]'); if (!z) return null;
+  const [op, form, list] = ADM.drag.split('|'), [zf, zl, pal] = z.dataset.dz.split('|');
+  if (zf !== form || zl !== list || (pal && op !== 'mv')) return null;
+  return { z, pal: !!pal };
+}
+document.addEventListener('dragstart', ev => {
+  const el = ev.target && ev.target.closest ? ev.target.closest('[data-dk]') : null; if (!el || !ADM || S.view !== 'admin') return;
+  ADM.drag = el.dataset.dk; el.classList.add('dragging');
+  try { ev.dataTransfer.effectAllowed = 'copyMove'; ev.dataTransfer.setData('text/plain', el.dataset.dk); } catch (e) { /* some browsers limit drag data */ }
+});
+document.addEventListener('dragover', ev => {
+  const t = dzTarget(ev); if (!t) return;
+  ev.preventDefault(); dzClear();
+  if (t.pal) { t.z.classList.add('dz-on'); return; }
+  const key = ADM.drag.split('|')[3], grid = t.z.classList.contains('mk-grid') || t.z.classList.contains('mk-docs');
+  const over = ev.target.closest('[data-dk^="mv|"]');
+  if (over && over.dataset.dk.split('|')[3] === key) { t.z.classList.add('dz-on'); return; }
+  /* the item under the pointer, or the nearest one when the pointer is in a gap */
+  let best = null, bd = 1e9;
+  t.z.querySelectorAll('[data-dk^="mv|"]').forEach(it => { if (it.dataset.dk.split('|')[3] === key) return; const r = it.getBoundingClientRect(), dx = Math.max(r.left - ev.clientX, 0, ev.clientX - r.right), dy = Math.max(r.top - ev.clientY, 0, ev.clientY - r.bottom), d = dx * dx + dy * dy * (grid ? 4 : 1); if (d < bd) { bd = d; best = it; } });
+  if (!best) { t.z.classList.add('dz-end'); return; }
+  const r = best.getBoundingClientRect();
+  best.classList.add((grid ? (ev.clientY > r.bottom ? true : ev.clientY < r.top ? false : ev.clientX > r.left + r.width / 2) : ev.clientY > r.top + r.height / 2) ? 'dz-a' : 'dz-b');
+});
+document.addEventListener('drop', ev => {
+  const t = dzTarget(ev); if (!t) return; ev.preventDefault();
+  const [op, form, list, key] = ADM.drag.split('|'), F = FM(); ADM.drag = null;
+  if (!F) { dzClear(); return; }
+  if (t.pal) { dzClear(); const it = F[form][list].find(x => x.k === key); if (!it || (form === 'lead' && key === 'a1mob') || (form === 'login' && key === 'app')) { render(); toast(it ? 'That one is always on the form' : 'Nothing to remove'); return; } fmOp({ k: 'del', form, list, key }, 'Edited in the new setup, by dragging'); render(); toast('Removed “' + fmLbl(form, list, it) + '”'); return; }
+  const self = ev.target.closest('[data-dk^="mv|"]'); if (op === 'mv' && self && self.dataset.dk.split('|')[3] === key) { dzClear(); return; }
+  const m = t.z.querySelector('.dz-b, .dz-a'); let at = null;
+  if (m) { const mk = m.dataset.dk.split('|')[3]; at = F[form][list].findIndex(x => x.k === mk); if (m.classList.contains('dz-a')) at++; }
+  dzClear();
+  const d = fmOp({ k: op === 'add' ? 'add' : 'mv', form, list, key, at, v: 0 }, 'Edited in the new setup, by dragging');
+  render(); if (d && op === 'add') toast('Added “' + fmLbl(form, list, { k: key }) + '”');
+});
+document.addEventListener('dragend', () => { if (ADM) ADM.drag = null; dzClear(); document.querySelectorAll('.dragging').forEach(e => e.classList.remove('dragging')); });
+
+/* ---------------- telling Uncia what to change: a voice note, a document or text ---------------- */
+const TKP = { tm: null, ctx: null, stop() { if (this.tm) clearInterval(this.tm); this.tm = null; if (ADM && ADM.tk && this.ctx && ADM.tk[this.ctx]) ADM.tk[this.ctx].play = 0; this.ctx = null; } };
+const tkDay = V => V.meta.split('. ').pop().replace(/^\w+ (\d+ \w+) .*$/, '$1');
+const tkSrcName = (ctx, k) => ({ voice: TKS[ctx].voice.who + '’s voice note', doc: TKS[ctx].doc ? lc1(TKS[ctx].doc.who) : '', text: 'your text' }[k] || '');
+const tkSrcLbl = (ctx, k) => ({ voice: 'Voice note from ' + TKS[ctx].voice.who + ', ' + tkDay(TKS[ctx].voice), doc: TKS[ctx].doc ? TKS[ctx].doc.who : '', text: 'Typed on the Admin page' }[k] || '');
+function tkSync(ctx) {
+  const T = ADM.tk[ctx], V = TKS[ctx].voice, p = $('#tkP-' + ctx), t = $('#tkT-' + ctx), b = $('#tkB-' + ctx);
+  if (p) p.style.width = (T.pt / V.dur * 100) + '%'; if (t) t.textContent = mmss(T.pt) + ' / ' + mmss(V.dur);
+  if (b) { b.innerHTML = ic(T.play ? 'pause' : 'play'); b.setAttribute('aria-label', T.play ? 'Pause' : 'Play'); }
+  V.segs.forEach((s, i) => { const el = $('#tks-' + ctx + '-' + i); if (el) el.classList.toggle('on', T.pt > 0 && T.pt >= s.t && (!V.segs[i + 1] || T.pt < V.segs[i + 1].t)); });
+}
+function tkHTML(ctx) {
+  const T = ADM.tk[ctx], X = TKS[ctx], V = X.voice, onb = ONB();
+  const what = ctx === 'org' ? 'the roles, SOPs and escalations' : ctx === 'lead' ? 'the new lead form' : 'the login documents';
+  const opt = (k, ico, l, s) => `<button class="ik-o${T.k === k ? ' on' : ''}" data-act="tkpick" data-v="${ctx}|${k}" aria-pressed="${T.k === k}">${ic(ico)}<span><b>${l}</b><small>${esc(s)}</small></span></button>`;
+  let body = '';
+  if (T.phase === 'run') body = runHTML(T.k === 'voice' ? ['Transcribing the voice note' + (/hindi/i.test(V.meta) ? ': Hindi and English' : ''), 'Finding the changes', 'Matching them to ' + what] : T.k === 'doc' ? ['Reading the circular', 'Finding the changes', 'Matching them to ' + what] : ['Reading your text', 'Matching it to ' + what], T.step, 'Reading it');
+  else if (T.phase === 'review') {
+    const n = T.props.filter(p => p.on).length;
+    body = `<div class="ik-rv"><p class="ik-rh"><b>${plural(T.props.length, 'change')} found</b> in ${esc(tkSrcName(ctx, T.k))}. Untick anything you don’t want.${onb ? '' : ' Nothing goes live until you save the draft.'}</p>${T.props.map((p, i) => `<label class="ik-p${p.on ? '' : ' off'}"><input type="checkbox" data-tk="${ctx}|${i}"${p.on ? ' checked' : ''}><span class="ar6 ${p.area}">${AREA[p.area]}</span><span class="ik-pt"><b>${esc(p.t)}</b><span class="ik-ba">${p.b ? `<s>${esc(p.b)}</s> ${ic('fwd')} ` : ''}<b>${esc(p.a)}</b></span><q>${esc(p.q)}</q></span></label>`).join('')}
+    ${T.miss.length ? `<details class="ik-miss"><summary>${plural(T.miss.length, 'line')} not used</summary><ul>${T.miss.map(x => `<li>${esc(x.q)}${x.why ? `<small>${esc(cap1(x.why))}</small>` : ''}</li>`).join('')}</ul>${T.k === 'text' ? `<p>Try: ${X.sug.map(x => `<button class="lnk" data-act="tksug" data-v="${ctx}|${esc(x)}">${esc(x)}</button>`).join(', ')}</p>` : ''}</details>` : ''}
+    <div class="ik-f"><button class="btn btn-p" data-act="tkadd" data-v="${ctx}"${n ? '' : ' disabled'}>${ic('check')}${onb ? 'Make ' + plural(n, 'change') : 'Add ' + plural(n, 'change') + ' to the draft'}</button><button class="btn btn-g" data-act="tkreset" data-v="${ctx}">Start again</button></div></div>`;
+  } else {
+    const on = i => T.pt > 0 && T.pt >= V.segs[i].t && (!V.segs[i + 1] || T.pt < V.segs[i + 1].t);
+    const prev = T.k === 'voice' ? `<div class="ik-src"><div class="ik-ap"><button class="ibtn" id="tkB-${ctx}" data-act="tkplay" data-v="${ctx}" aria-label="${T.play ? 'Pause' : 'Play'}">${ic(T.play ? 'pause' : 'play')}</button><div class="ik-bar"><i id="tkP-${ctx}" style="width:${T.pt / V.dur * 100}%"></i></div><span id="tkT-${ctx}">${mmss(T.pt)} / ${mmss(V.dur)}</span></div><ol class="ik-tr">${V.segs.map((s, i) => `<li id="tks-${ctx}-${i}" class="${on(i) ? 'on' : ''}"><time>${mmss(s.t)}</time><span>${esc(s.o)}${s.e ? `<small>${esc(s.e)}</small>` : ''}</span></li>`).join('')}</ol></div>`
+      : T.k === 'doc' ? `<div class="ik-src"><div class="ik-doc"><b>${esc(X.doc.n)}</b><small>${esc(X.doc.meta)}</small>${X.doc.lines.map(l => `<p>${esc(l)}</p>`).join('')}</div></div>`
+        : T.k === 'text' ? `<div class="ik-src"><textarea class="ta" id="tktxt-${ctx}" rows="3" placeholder="For example: ${esc(X.sug[0])}">${esc(T.txt)}</textarea><p class="ik-try">Try: ${X.sug.map(x => `<button class="lnk" data-act="tksug" data-v="${ctx}|${esc(x)}">${esc(x)}</button>`).join(', ')}</p></div>` : '';
+    body = `<div class="ik-os${X.doc ? '' : ' two'}">${opt('voice', 'mic', 'Voice note', V.who + ', ' + V.meta.split('.')[0])}${X.doc ? opt('doc', 'file', 'Document', X.doc.n) : ''}${opt('text', 'text', 'Type it', 'A few lines, in plain words')}</div>${prev}${T.k ? `<div class="ik-f"><button class="btn btn-p" data-act="tkgo" data-v="${ctx}" id="tkGo-${ctx}"${T.k === 'text' && !T.txt.trim() ? ' disabled' : ''}>${ic('wand')}Find the changes</button></div>` : ''}${T.added ? `<p class="ik-ok">${ic('check')}${esc(T.added)}</p>` : ''}`;
+  }
+  return `<section class="panel ik tk11"><div class="ph"><h3>${ic('wand')}Tell Uncia what to change</h3><span class="note">${ctx === 'org' ? 'A voice note, a document or a few lines. Uncia finds the changes to the roles, SOPs and escalations.' : 'A voice note or a few lines. Uncia finds the changes to ' + what + '.'}</span></div><div class="pb">${body}</div></section>`;
+}
+
+/* reading the words: one sentence at a time */
+const NUMW11 = Object.assign({ eight: 8, nine: 9, ten: 10, twelve: 12 }, NUMW);
+const toN = x => +x || NUMW11[x] || 0;
+function tkSplit(txt) { return txt.split(/\n+|(?<=[.!?;])\s+/).map(x => x.replace(/^\s*(\d+[.)]|[-*•])\s*/, '').replace(/^(and|also|aur|then|plus)\s+/i, '').replace(/;+$/, '').trim()).filter(x => x.length > 3).map(cap1); }
+const FAL = [
+  [/alternate (mobile|number|phone|contact)/, 'fields', 'alt'], [/contact number|mobile( number)?|phone( number)?/, 'fields', 'a1mob'],
+  [/first name/, 'fields', 'a1f'], [/last name|surname/, 'fields', 'a1l'], [/middle name/, 'fields', 'mid'], [/e-?mail/, 'fields', 'email'], [/date of birth|\bdob\b|birth ?date/, 'fields', 'dob'],
+  [/pan card|e-?pan|copy of (the )?pan/, 'docs', 'pan'], [/\bpan\b/, 'fields', 'a1pan'], [/aadhaa?r/, 'docs', 'adh'], [/salary slips?|pay ?slips?/, 'docs', 'sal'], [/bank statements?/, 'docs', 'bank6'],
+  [/form ?16/, 'docs', 'f16'], [/\bitr\b|income tax returns?/, 'docs', 'itr'], [/photo(graph)?s?/, 'docs', 'photo'],
+  [/co-?applicant/, 'fields', 'coap'], [/type of applicant|applicant type/, 'fields', 'atype'], [/type of loan|loan type/, 'fields', 'ltype'], [/loan amount|amount of (the )?loan/, 'fields', 'loan'], [/tenure/, 'fields', 'ten'],
+  [/property type|type of property/, 'fields', 'ptype'], [/property (value|price)|(value|price) of the property/, 'fields', 'price'], [/monthly (pay|income|salary)|\bincome\b|\bsalary\b/, 'fields', 'a1inc'],
+  [/branch city|\bcity\b/, 'fields', 'city'], [/employer|company name/, 'fields', 'emp'], [/preferred language|\blanguage\b/, 'fields', 'lang'], [/lead source|source of the lead/, 'fields', 'lsrc'], [/pin ?code/, 'fields', 'pin']
+];
+const GAL = [
+  [/application form/, 'app'], [/form ?16/, 'f16l'], [/bank statements?[^.]*?\b(12|twelve) months|\b(12|twelve) months[^.]*?bank statements?|self-?employed[^.]*?bank statements?|bank statements?[^.]*?self-?employed/, 'bank12'], [/bank statements?/, 'bank6l'],
+  [/\bitr\b|income tax returns?/, 'itr2'], [/gst returns?|\bgst\b/, 'gst'], [/agreement (to|for) sale|agreement to sell|sale agreement|\bats\b/, 'ats'], [/sale deed|title deed/, 'deed'], [/encumbrance|\bec\b/, 'ec'],
+  [/occupancy|completion certificate|\boc\b/, 'oc'], [/share certificate|society noc|\bsociety\b/, 'share'], [/allotment|builder noc/, 'allot'], [/approved plan|building plan|cost estimate/, 'plan'], [/property tax|tax receipt/, 'tax'],
+  [/\bkyc\b/, 'kyc'], [/photo(graph)?s?/, 'photo'], [/salary slips?|pay ?slips?/, 'sal3'], [/profit and loss|\bp ?& ?l\b|balance sheet/, 'pnl'], [/cancell?ed cheque|\bcheque\b/, 'chq']
+];
+const CAL = [[/\bpan\b/, 'pan'], [/aadhaa?r/, 'adh'], [/salary slips?|pay ?slips?/, 'sal'], [/form ?16/, 'f16'], [/\bitr\b|income tax returns?/, 'itr'], [/bank statements?[^.]*?\b(6|six) months|\b(6|six) months[^.]*?bank statements?/, 'bank6'], [/bank statements?/, 'bank12'], [/photo(graph)?s?/, 'photo'], [/relationship|marriage certificate/, 'relp']];
+function fmHits(ctx, s) {
+  const AL = ctx === 'lead' ? FAL : ctx === 'co' ? CAL.map(([re, k]) => [re, 'codocs', k]) : GAL.map(([re, k]) => [re, 'docs', k]), out = []; let w = s;
+  AL.forEach(([re, list, key]) => { const m = w.match(re); if (m) { out.push({ list, key, i: m.index }); w = w.slice(0, m.index) + ' '.repeat(m[0].length) + w.slice(m.index + m[0].length); } });
+  return out.sort((a, b) => a.i - b.i);
+}
+function feeParse(ctx, s, W) {
+  if (ctx !== 'login') return { miss: 'the application fee is set on the login documents screen' };
+  const f = W.login.fee, mk = v => { const op = { k: 'fee', form: 'login', v }, d = fmDesc(op, W); fmApply(op, W); return { props: [{ area: 'form', t: d.t, b: d.b, a: d.a, ops: [op] }] }; };
+  if (/adjust/.test(s)) { const v = /\b(don't|do not|not|stop|no longer)\b/.test(s) ? 0 : 1; return !!f.adj === !!v ? { miss: 'it is already set that way' } : mk({ adj: v }); }
+  if (/waiv|\bstop\b|\bno (application |login )?fee|\bremove\b|\bdrop\b|don't (collect|charge|take)|do not (collect|charge|take)|\bscrap|\bfree\b/.test(s)) return f.on ? mk({ on: 0 }) : { miss: 'the application fee is already off' };
+  const m = s.match(/(?:₹|\brs\.?|\binr|rupees)\s*([\d,]+(?:\.\d+)?)|\b(\d[\d,]{2,})\s*(?:rupees|rs\b)/);
+  if (m) { let a = +String(m[1] || m[2]).replace(/,/g, ''); if (/\+\s*gst|plus gst|excluding gst|before gst|exclusive of gst/.test(s)) a = Math.round(a * 1.18); if (f.on && f.amt === a) return { miss: 'the fee is already ' + inr(a) }; return mk({ on: 1, amt: a }); }
+  if (/\b(collect|charge|start|bring back|turn on|take)\b/.test(s)) return f.on ? { miss: 'the application fee is already collected' } : mk({ on: 1 });
+  return { miss: 'no change to the fee found' };
+}
+function coParse(s0, s, W) {
+  const f = W.login.cofg, mk = v => { const op = { k: 'cofg', form: 'login', v }, d = fmDesc(op, W); fmApply(op, W); return { props: [{ area: 'form', t: d.t, b: d.b, a: d.a, ops: [op] }] }; };
+  const mx = s.match(/up to (\d|one|two|three|four)\b/);
+  if (/\b(don't|do not|stop|no longer|not) (allow|let|add|take)|\bno co-?applicants|turn off/.test(s)) return f.on ? mk({ on: 0 }) : { miss: 'co-applicants are already off' };
+  if (mx) { const n = Math.max(1, Math.min(4, toN(mx[1]))); return f.on && f.max === n ? { miss: 'it is already up to ' + n } : mk({ on: 1, max: n }); }
+  if (/\b(allow|let|turn on|start)\b/.test(s) && !CAL.some(([re]) => re.test(s))) return f.on ? { miss: 'co-applicants are already allowed' } : mk({ on: 1 });
+  return fmParse('co', s0, W);
+}
+function fmParse(ctx, s0, W) {
+  const s = ' ' + s0.toLowerCase().replace(/[’']/g, "'") + ' ';
+  if (ctx === 'login' && /co-?applicants?/.test(s)) return coParse(s0, s, W);
+  if (/\bfee\b/.test(s)) return feeParse(ctx, s, W);
+  const H = fmHits(ctx, s); if (!H.length) return { miss: 'it names no field or document on this form' };
+  const form = ctx === 'co' ? 'login' : ctx, arr = h => W[form][h.list], got = h => arr(h).find(x => x.k === h.key), lb = h => fmLbl(form, h.list, got(h) || { k: h.key });
+  const lockWhy = h => (form === 'lead' && h.key === 'a1mob') ? 'the contact number is always required: the consent SMS goes to it' : (form === 'login' && h.key === 'app') ? 'the application form is always required: a file cannot log in without it' : '';
+  const mk = op => { const d = fmDesc(op, W); fmApply(op, W); return { area: 'form', t: d.t, b: d.b, a: d.a, ops: [op] }; };
+  const X = H[0], props = [], miss = [];
+  if (/\b(rename|call)\b/.test(s) && /\s(to|as)\s/.test(s)) {
+    const m = s0.match(/\s(?:to|as)\s+["“]?([^"”]+?)["”]?\.?\s*$/i);
+    if (!m || !got(X)) return { miss: lb(X) + ' is not on the form' };
+    return { props: [mk({ k: 'ren', form, list: X.list, key: X.key, v: cap1(m[1].trim()) })] };
+  }
+  if (/\b(move|put|place|show)\b/.test(s) && /\b(above|below|before|after|first|top|last|end|bottom)\b/.test(s)) {
+    if (!got(X)) return { miss: lb(X) + ' is not on the form' };
+    const Y = H.find(h => h !== X && h.list === X.list), after = /\b(below|after|last|end|bottom)\b/.test(s); let at = null;
+    if (Y) { if (!got(Y)) return { miss: lb(Y) + ' is not on the form' }; at = arr(Y).findIndex(x => x.k === Y.key) + (after ? 1 : 0); }
+    else if (/\b(first|top)\b/.test(s)) at = 0;
+    const op = { k: 'mv', form, list: X.list, key: X.key, at }, d = fmDesc(op, W); if (d.b === d.a) return { miss: lb(X) + ' is already there' };
+    return { props: [mk(op)] };
+  }
+  if (/\b(optional|not (mandatory|required|compulsory|needed)|no longer (mandatory|required))\b/.test(s)) H.forEach(h => { const it = got(h); if (lockWhy(h)) miss.push(lockWhy(h)); else if (!it) miss.push(lb(h) + ' is not on the form'); else if (!it.req) miss.push(lb(h) + ' is already optional'); else props.push(mk({ k: 'req', form, list: h.list, key: h.key, v: 0 })); });
+  else if (/\b(remove|delete|drop|hata\w*|take (out|off)|get rid of|no longer (ask|collect|need)|stop (asking|collecting|taking)|don't (ask|collect|take|need)|do not (ask|collect|take|need))\b/.test(s)) H.forEach(h => { if (lockWhy(h)) miss.push(lockWhy(h)); else if (!got(h)) miss.push(lb(h) + ' is not on the form'); else props.push(mk({ k: 'del', form, list: h.list, key: h.key })); });
+  else if (/\b(add|include|ask for|ask|collect|also take|take|le lo|chahiye|need)\b/.test(s)) {
+    const req = /\b(mandatory|required|compulsory)\b/.test(s) ? 1 : 0, pm = s.match(/\b(after|before|above|below)\b/), Y = pm ? H.find(h => h.i > pm.index && h !== X) : null;
+    H.filter(h => h !== Y).forEach(h => { const it = got(h);
+      if (it) { if (req && !it.req) props.push(mk({ k: 'req', form, list: h.list, key: h.key, v: 1 })); else miss.push(lb(h) + ' is already on the form'); return; }
+      let at = null; if (Y && Y.list === h.list && got(Y)) at = arr(Y).findIndex(x => x.k === Y.key) + (/after|below/.test(pm[1]) ? 1 : 0);
+      props.push(mk({ k: 'add', form, list: h.list, key: h.key, at, v: req })); });
+  } else if (/\b(mandatory|required|compulsory|must)\b/.test(s)) H.forEach(h => { const it = got(h); if (!it) miss.push(lb(h) + ' is not on the form. Add it first'); else if (it.req) miss.push(lb(h) + ' is already required'); else props.push(mk({ k: 'req', form, list: h.list, key: h.key, v: 1 })); });
+  else return { miss: 'no change to the form found' };
+  return props.length ? { props } : { miss: miss.join('. ') || 'no change found' };
+}
+
+/* onboarding: roles, people, SOP steps and escalations */
+const ogRole = (t, G) => { const l = (t || '').toLowerCase(), f = findRole(t || ''); if (f && f !== 'sys') return f; const r = (G ? G.roles : []).concat(OROLE.map(([id, n]) => ({ id, n }))).find(x => l.includes(x.n.toLowerCase().split(',')[0])); return r ? r.id : ''; };
+const ogNew = () => 'n' + (++ADM.nid);
+function ogApply(op, G) {
+  const R = id => G.roles.find(x => x.id === id), SP = id => { let s = G.sops.find(x => x.id === id); if (!s) { s = { id, steps: [] }; G.sops.push(s); } return s; }, E = id => G.esc.find(x => x.id === id);
+  const sortLv = e => e.lv.sort((a, b) => a.n * UNITS[a.u][1] - b.n * UNITS[b.u][1]);
+  switch (op.k) {
+    case 'padd': { const r = R(op.id); if (r && !r.ppl.includes(op.v)) r.ppl.push(op.v); break; }
+    case 'pdel': { const r = R(op.id); if (r) r.ppl = r.ppl.filter(p => p !== op.v); break; }
+    case 'rn': { const r = R(op.id); if (r) r.n = op.v; break; }
+    case 'rr': { const r = R(op.id); if (r) r.resp = op.v.slice(); break; }
+    case 'ra': { const r = R(op.id); if (r) r.acc = op.v; break; }
+    case 'radd': G.roles.push({ id: op.id, n: op.v, ppl: [], resp: [], acc: 'LOS: files assigned to them', add: 1 }); break;
+    case 'rdel': G.roles = G.roles.filter(x => x.id !== op.id); G.sops = G.sops.filter(x => x.id !== op.id); break;
+    case 'sopadd': SP(op.id).steps.push({ id: op.sid || ogNew(), t: op.t, sla: op.sla, src: op.src || '', add: 1 }); break;
+    case 'st': case 'ss': { const st = SP(op.id).steps.find(x => x.id === op.sid); if (st) st[op.k === 'st' ? 't' : 'sla'] = op.v; break; }
+    case 'sdel': { const s = SP(op.id); s.steps = s.steps.filter(x => x.id !== op.sid); break; }
+    case 'smv': { const s = SP(op.id), i = s.steps.findIndex(x => x.id === op.sid), j = i + op.d; if (i < 0 || j < 0 || j >= s.steps.length) break; const [x] = s.steps.splice(i, 1); s.steps.splice(j, 0, x); break; }
+    case 'escset': case 'escadd': { const e = E(op.id); if (!e) break; const l = e.lv.find(x => x.r === op.r); if (l) { l.n = op.n; l.u = op.u; } else e.lv.push({ r: op.r, n: op.n, u: op.u }); sortLv(e); break; }
+    case 'et': { const e = E(op.id); if (e) e.t = op.v; break; }
+    case 'el': { const e = E(op.id); if (!e || !e.lv[op.i]) break; Object.assign(e.lv[op.i], op.v); sortLv(e); break; }
+    case 'ldel': { const e = E(op.id); if (e) e.lv.splice(op.i, 1); break; }
+    case 'eadd': G.esc.push({ id: op.id, t: op.v, lv: [{ r: 'smgr', n: 1, u: 'wd' }], add: 1 }); break;
+    case 'edel': G.esc = G.esc.filter(x => x.id !== op.id); break;
+  }
+}
+function ogDesc(op, G) {
+  const nm = id => orgRN(G, id), e = op.id ? G.esc.find(x => x.id === op.id) : null, st = op.sid ? ((G.sops.find(x => x.id === op.id) || { steps: [] }).steps.find(x => x.id === op.sid) || {}) : {};
+  const escAfter = () => { const C = deep(G); ogApply(op, C); return escStr(C, C.esc.find(x => x.id === op.id)); };
+  switch (op.k) {
+    case 'padd': return { t: nm(op.id) + ': a new person', b: '', a: op.v + (op.from ? ', from ' + op.from : '') };
+    case 'pdel': return { t: nm(op.id) + ': removed a person', b: op.v, a: 'Removed' };
+    case 'rn': return { t: 'Renamed a role', b: nm(op.id), a: op.v };
+    case 'rr': { const r = G.roles.find(x => x.id === op.id); return { t: nm(op.id) + ': responsibilities', b: plural(r ? r.resp.length : 0, 'line'), a: plural(op.v.length, 'line') }; }
+    case 'ra': { const r = G.roles.find(x => x.id === op.id); return { t: nm(op.id) + ': access', b: r ? r.acc : '', a: op.v }; }
+    case 'radd': return { t: 'Added a role', b: '', a: op.v };
+    case 'rdel': return { t: 'Removed the role “' + nm(op.id) + '”', b: '', a: 'Removed, with its SOP' };
+    case 'sopadd': return { t: nm(op.id) + ' SOP: a new step', b: '', a: op.t + ' (' + op.sla + ')' };
+    case 'st': return { t: nm(op.id) + ' SOP: changed a step', b: st.t || '', a: op.v };
+    case 'ss': return { t: nm(op.id) + ' SOP: turnaround of “' + short(st.t || '', 44) + '”', b: st.sla || '', a: op.v };
+    case 'sdel': return { t: nm(op.id) + ' SOP: removed a step', b: st.t || '', a: 'Removed' };
+    case 'smv': return { t: nm(op.id) + ' SOP: moved “' + short(st.t || '', 44) + '” ' + (op.d < 0 ? 'up' : 'down'), b: '', a: '' };
+    case 'et': return { t: 'Renamed an escalation', b: e ? e.t : '', a: op.v };
+    case 'escset': case 'escadd': case 'el': case 'ldel': return { t: 'Escalation: ' + short(e ? e.t : '', 70), b: e ? escStr(G, e) : '', a: escAfter() };
+    case 'eadd': return { t: 'Added an escalation', b: '', a: op.v };
+    case 'edel': return { t: 'Removed an escalation: ' + (e ? e.t : ''), b: e ? escStr(G, e) : '', a: 'Removed' };
+  }
+  return { t: 'Onboarding', b: '', a: '' };
+}
+function ogHi(ids) { ADM.ogHi = ids; clearTimeout(ogHi.t); ogHi.t = setTimeout(() => { if (ADM) ADM.ogHi = []; }, 1700); }
+function ogOp(op, why, src, srcK) {
+  const G = ORGC(); if (!G) return null;
+  const d = ogDesc(op, G); if (d.b && d.b === d.a) return null;
+  ogApply(op, G);
+  if (ONB()) alog2({ area: 'org', what: d.t, b: d.b, a: d.a, why: why || 'Edited in the new setup', src: src || '', srcK: srcK || '' });
+  ogHi([(op.k[0] === 'e' || op.k === 'el' || op.k === 'ldel' ? 'esc|' : op.k[0] === 's' ? 'sop|' : 'role|') + (op.id || '')]);
+  return d;
+}
+const DUR = '(\\d+|one|two|three|four|five|six|seven|eight|ten|twelve)\\s+(?:working\\s+)?(minutes?|hours?|days?)';
+const durOf = m => m ? { n: toN(m[1]), u: /minute/.test(m[2]) ? 'min' : /hour/.test(m[2]) ? 'wh' : 'wd' } : null;
+function ogParse(s0, who, W) {
+  const s = s0.toLowerCase().replace(/[’']/g, "'"), mk = op => { const d = ogDesc(op, W); ogApply(op, W); return { props: [{ area: 'org', t: d.t, b: d.b, a: d.a, ops: [op] }] }; };
+  const NAME = '([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)+)', role = t => ogRole(t, W), hasRole = id => W.roles.some(x => x.id === id);
+  let m = s0.match(/\badd (?:this )?to (?:the )?(.+?) SOP\s*[:,-]\s*(.+)$/i);
+  if (m) { const r = role(m[1]); if (!r) return { miss: 'no role by that name' }; const t = cap1(m[2].trim().replace(/[.;]+$/, '')), sla = findSla(t); return mk({ k: 'sopadd', id: r, sid: ogNew(), t, sla: sla ? slaTxt(sla) : 'As needed' }); }
+  m = s0.match(new RegExp('^' + NAME + '\\s+(?:joins|is joining|has joined|will join)\\s+(?:the\\s+)?(.+)$'));
+  if (!m) { const a = s0.match(new RegExp('^[Aa]dd\\s+' + NAME + '\\s+to\\s+(?:the\\s+)?(.+?)\\.?$')); if (a) m = a; }
+  if (m) { const r = role(m[2]); if (!r) return { miss: 'no role by that name' }; if (!hasRole(r)) return { miss: 'the roles are not set up yet' };
+    const city = (m[2].match(/\bin ([A-Z][a-z]+)/) || [])[1], from = (m[2].match(/\bfrom ([A-Z0-9][\w ]*?)\s*(?:[.,]|$)/) || [])[1], p = m[1] + (city ? ', ' + city : '');
+    if (W.roles.find(x => x.id === r).ppl.some(x => x.split(',')[0] === m[1])) return { miss: m[1] + ' is already in ' + orgRN(W, r) };
+    return mk({ k: 'padd', id: r, v: p, from }); }
+  m = s0.match(new RegExp('^[Rr]emove\\s+' + NAME + '\\s+from\\s+(?:the\\s+)?(.+?)\\.?$')) || s0.match(new RegExp('^' + NAME + '\\s+(?:has left|is leaving|leaves|left)\\b'));
+  if (m) { const r = W.roles.find(x => x.ppl.some(p => p.split(',')[0] === m[1])); if (!r) return { miss: m[1] + ' is not in any role' }; return mk({ k: 'pdel', id: r.id, v: r.ppl.find(p => p.split(',')[0] === m[1]) }); }
+  if (/escalat|\btell\b|\binform\b|goes to|go to|\bbata|notify|\balert/.test(s) && /\b(late|after|within|past)\b/.test(s)) {
+    const row = (ESCK.find(([re]) => re.test(s)) || [])[1], e = row ? W.esc.find(x => x.id === row) : null;
+    const tm = s.match(/\b(?:escalate(?: it)?|tell|inform|notify|alert|goes|go|send it)\s+(?:it\s+)?(?:to\s+)?(?:the\s+)?(me\b|[a-z][a-z ,-]*?)(?=\s+(?:after|too|also|as well|within|if|when|not)\b|[.,;]|$)/);
+    const r = tm ? (tm[1] === 'me' ? who : role(tm[1])) : /\bme\b/.test(s) ? who : '';
+    const t = durOf(s.match(new RegExp('after\\s+' + DUR))) || durOf(s.match(new RegExp('late by\\s+' + DUR))) || durOf(s.match(new RegExp(DUR + '\\s+(?:late|past)')));
+    if (!e) return { miss: 'no escalation like it in the matrix' }; if (!r) return { miss: 'it does not say who to escalate to' }; if (!t || !t.n) return { miss: 'it does not say after how long' };
+    const l = e.lv.find(x => x.r === r); if (l && l.n === t.n && l.u === t.u) return { miss: 'that is already the rule' }; if (!l && e.lv.length >= 3) return { miss: 'an escalation has up to 3 levels' };
+    return mk({ k: l ? 'escset' : 'escadd', id: row, r, n: t.n, u: t.u });
+  }
+  return { miss: 'no change to the roles, SOPs or escalations found' };
+}
+function tkParse(ctx, txt, who) {
+  const W = deep(ctx === 'org' ? ORGC() : FM()), props = [], miss = [];
+  tkSplit(txt).forEach(s0 => { const r = ctx === 'org' ? ogParse(s0, who, W) : fmParse(ctx, s0, W); if (r.props) r.props.forEach(p => { p.on = 1; p.q = s0; props.push(p); }); else miss.push({ q: s0, why: r.miss || '' }); });
+  return { props, miss };
+}
+Object.assign(ACT, {
+  tkpick(v) { const [ctx, k] = v.split('|'), T = ADM.tk[ctx]; if (T.k !== k) { TKP.stop(); T.k = k; T.pt = 0; } T.added = ''; render(); },
+  tksug(v) { const i = v.indexOf('|'), ctx = v.slice(0, i), x = v.slice(i + 1), T = ADM.tk[ctx]; T.k = 'text'; T.txt = (T.txt.trim() ? T.txt.trim() + '\n' : '') + x; T.phase = 'pick'; T.added = ''; render(); },
+  tkplay(ctx) {
+    const T = ADM.tk[ctx], V = TKS[ctx].voice; if (T.play) { TKP.stop(); tkSync(ctx); return; }
+    TKP.stop(); if (T.pt >= V.dur) T.pt = 0; T.play = 1; TKP.ctx = ctx; tkSync(ctx);
+    TKP.tm = setInterval(() => { if (!ADM || ADM.tk[ctx] !== T) { TKP.stop(); return; } T.pt = Math.min(V.dur, T.pt + 1); if (T.pt >= V.dur) TKP.stop(); tkSync(ctx); }, 120);
+  },
+  tkgo(ctx) {
+    const T = ADM.tk[ctx], X = TKS[ctx]; if (!T.k) return; TKP.stop();
+    const txt = T.k === 'voice' ? X.voice.segs.map(s => s.e || s.o).join('\n') : T.k === 'doc' ? X.doc.lines.join('\n') : T.txt; if (!txt.trim()) return;
+    T.phase = 'run'; T.step = 0; T.added = ''; render(); const N = T.k === 'text' ? 2 : 3;
+    const nx = () => { if (!ADM || ADM.tk[ctx] !== T || T.phase !== 'run') return; T.step++; if (T.step < N) { render(); setTimeout(nx, 480); return; }
+      const who = T.k === 'voice' ? X.voice.role : T.k === 'doc' ? X.doc.role : 'losadm', r = tkParse(ctx, txt, who);
+      T.props = r.props; T.miss = T.k === 'voice' ? [] : r.miss; T.phase = r.props.length ? 'review' : 'pick'; render();
+      if (!r.props.length) toast(r.miss.length && r.miss[0].why ? 'Nothing to change: ' + r.miss[0].why : 'No change found. Try one of the examples'); };
+    setTimeout(nx, 480);
+  },
+  tkadd(ctx) {
+    const T = ADM.tk[ctx], P = T.props.filter(p => p.on); if (!P.length) return;
+    const src = tkSrcLbl(ctx, T.k), srcK = { voice: 'S2', doc: 'S1', text: 'T' }[T.k], why = T.k === 'text' ? 'Typed on the Admin page' : 'As asked in ' + tkSrcName(ctx, T.k), ids = []; let n = 0;
+    P.forEach(p => p.ops.forEach(op => { const d = ctx === 'org' ? ogOp(op, why, src, srcK) : fmOp(op, why, src, srcK); if (d) { n++; ids.push(ctx === 'org' ? (ADM.ogHi || [])[0] : (ADM.fmHi || [])[0]); } }));
+    if (ctx === 'org') { ogHi(ids); const k = P[0].ops[0].k; ADM.osec = /^esc/.test(k) ? 'esc' : k === 'sopadd' ? 'sops' : 'roles'; if (k === 'sopadd') ADM.osop = P[0].ops[0].id; } else fmHi(ids);
+    if (!ONB() && n) { ADM.src = src; ADM.srcK = srcK; if (!ADM.why.trim() && T.k !== 'text') ADM.why = why; }
+    T.added = n ? plural(n, 'change') + (ONB() ? ' made from ' + tkSrcName(ctx, T.k) + '. Each one is in the audit trail.' : ' added to the draft from ' + tkSrcName(ctx, T.k) + '. Save them at the bottom of the page.') : 'Nothing changed: the form already matches.';
+    T.phase = 'pick'; T.k = null; T.props = []; T.miss = []; T.txt = ''; T.pt = 0;
+    render(); if (n) toast(plural(n, 'change') + (ONB() ? ' made' : ' added to the draft'));
+  },
+  tkreset(ctx) { const T = ADM.tk[ctx]; T.phase = 'pick'; T.props = []; T.miss = []; render(); }
+});
+
+/* ---------------- 7. Onboarding: roles, SOPs and the escalation matrix ---------------- */
+const ogDm = () => { const dm = {}; if (!ONB()) orgDiff(ADM.org.live, ADM.org.liveW).forEach(d => { if (!dm[d.id] || d.k === 'add') dm[d.id] = d.k; }); (ADM.ogHi || []).forEach(id => { dm[id] = dm[id] || 'hi'; }); return dm; };
+const ogCls = st => st ? (st === 'hi' ? ' hi' : ' d-' + st) : '';
+const ogTag = st => st && st !== 'hi' ? dTag(st) : '';
+function orgSecHTML() {
+  const onb = ONB();
+  if (onb && ADM.disc.phase === 'run') return runDisc();
+  const G = ORGC();
+  const head = `<div class="cap6-h"><h3>Onboarding</h3><p>Who does what, how each role does it, and who hears about it when something is late. ${onb ? 'Set up from your documents in Discovery; change anything here, by hand or by telling Uncia.' : 'What is running now. Changes stay in a draft until you save them with a reason.'}</p></div>`;
+  if (!G || (!G.roles.length && !G.sops.length && !G.esc.length)) return head + emptyHTML2('users', 'No roles yet', 'Add the role master and the escalation matrix in Discovery. Uncia sets up who does what, an SOP for each role from your SOP, and who to escalate to. Or start from the standard home loan roles and change them here.', [['orgstd', '', 'Start from the standard roles', 1], ['asec', 'disc', 'Go to Discovery']]);
+  const src = onb ? listAnd(['RMX', 'ESC', 'S1'].filter(k => ADM.org.onbSrc[k]).map(k => dsrc(k).n)) : '';
+  const tabs = [['roles', 'Roles and responsibilities', G.roles.length], ['sops', 'SOPs', G.sops.length], ['esc', 'Escalation matrix', G.esc.length]];
+  const sub = `<div class="og-t" role="tablist" aria-label="Onboarding">${tabs.map(([k, l, n]) => `<button class="flt${ADM.osec === k ? ' on' : ''}" data-act="osec" data-v="${k}" role="tab" aria-selected="${ADM.osec === k}">${l} <span>${n}</span></button>`).join('')}${src ? `<span class="og-src">${ic('file')}From ${esc(src)}</span>` : ''}</div>`;
+  const dm = ogDm(), body = { roles: ogRolesHTML, sops: ogSopsHTML, esc: ogEscHTML }[ADM.osec](G, dm);
+  return head + tkHTML('org') + sub + body;
+}
+function ogRolesHTML(G, dm) {
+  if (!G.roles.length) return `<p class="og-none">No roles yet. Add the role master in Discovery, <button class="lnk" data-act="orgstd">start from the standard roles</button> or <button class="lnk" data-act="ogradd">add a role by hand</button>.</p>`;
+  const card = r => {
+    const id = 'role|' + r.id, st = dm[id], lim = roleLim(r.id), ed = ADM.oed === id;
+    if (ed) return `<article class="og-r ed"><label class="fp-f">Role<input class="inp2" data-og="rn|${r.id}" value="${esc(r.n)}"></label>
+      <div class="fp-f">People<div class="og-pp">${r.ppl.map(p => `<span class="og-p">${esc(p)}<button class="mk-x" data-act="ogpdel" data-v="${r.id}|${esc(p)}" aria-label="Remove ${esc(p)}">${ic('x')}</button></span>`).join('') || '<small class="og-0">No one yet</small>'}</div><div class="og-add"><input class="inp2" id="ogp-${r.id}" placeholder="Name, and city if any" aria-label="Add a person"><button class="btn btn-s btn-sm" data-act="ogpadd" data-v="${r.id}">${ic('plus')}Add</button></div></div>
+      <label class="fp-f">Responsibilities, one a line<textarea class="ta" rows="4" data-og="rr|${r.id}">${esc(r.resp.join('\n'))}</textarea></label>
+      <label class="fp-f">Access in the LOS<input class="inp2" data-og="ra|${r.id}" value="${esc(r.acc)}"></label>
+      <div class="fp-a"><button class="btn btn-p btn-sm" data-act="oged" data-v="">${ic('check')}Done</button>${r.id === 'losadm' ? '' : `<button class="btn btn-g btn-sm" data-act="ogrdel" data-v="${r.id}">${ic('trash')}Remove the role</button>`}</div></article>`;
+    return `<article class="og-r${ogCls(st)}">${ogTag(st)}<header><b>${esc(r.n)}</b><button class="ibtn" data-act="oged" data-v="${id}" aria-label="Edit ${esc(r.n)}" title="Edit">${ic('pen')}</button></header>${lim ? `<span class="og-lim">${ic('shield')}${esc(lim)}</span>` : ''}
+      <div class="og-pp">${r.ppl.map(p => `<span class="og-p"><i>${esc(inits(p.split(',')[0]))}</i>${esc(p)}</span>`).join('') || '<small class="og-0">No one yet</small>'}</div>
+      ${r.resp.length ? `<ul class="og-rs">${r.resp.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}<small class="og-acc">${ic('key')}${esc(r.acc)}</small></article>`;
+  };
+  return `<div class="og-rg">${G.roles.map(card).join('')}<button class="og-new" data-act="ogradd">${ic('plus')}Add a role</button></div>`;
+}
+function ogSopsHTML(G, dm) {
+  const ids = [...new Set(G.roles.map(r => r.id).concat(G.sops.map(s => s.id)))];
+  if (!ids.length) return `<p class="og-none">No SOPs yet: add the SOP in Discovery.</p>`;
+  if (!ids.includes(ADM.osop)) ADM.osop = (G.sops[0] || { id: ids[0] }).id;
+  const s = G.sops.find(x => x.id === ADM.osop) || { id: ADM.osop, steps: [] }, id = 'sop|' + s.id, ed = ADM.oed === id, r = G.roles.find(x => x.id === s.id), st = dm[id];
+  const nav = `<nav class="og-sl" aria-label="Roles">${ids.map(k => { const x = G.sops.find(y => y.id === k), d = dm['sop|' + k]; return `<button class="${k === ADM.osop ? 'on' : ''}${d && d !== 'hi' ? ' chg' : ''}" data-act="osop" data-v="${k}"><b>${esc(orgRN(G, k))}</b><small>${x && x.steps.length ? plural(x.steps.length, 'step') : 'No SOP yet'}</small></button>`; }).join('')}</nav>`;
+  const rows = s.steps.map((x, i) => ed
+    ? `<li class="ed"><span class="og-n">${i + 1}</span><span class="og-se"><textarea class="ta" rows="2" data-og="st|${s.id}|${x.id}" aria-label="Step ${i + 1}">${esc(x.t)}</textarea><input class="inp2" data-og="ss|${s.id}|${x.id}" value="${esc(x.sla)}" aria-label="Turnaround of step ${i + 1}"></span><span class="og-sa"><button class="ibtn" data-act="ogsmv" data-v="${s.id}|${x.id}|-1"${i ? '' : ' disabled'} aria-label="Move up">${ic('up')}</button><button class="ibtn" data-act="ogsmv" data-v="${s.id}|${x.id}|1"${i < s.steps.length - 1 ? '' : ' disabled'} aria-label="Move down">${ic('dn')}</button><button class="ibtn" data-act="ogsdel" data-v="${s.id}|${x.id}" aria-label="Remove step ${i + 1}">${ic('trash')}</button></span></li>`
+    : `<li><span class="og-n">${i + 1}</span><span class="og-tx"><b>${esc(x.t)}</b><small>${ic('clock')}${esc(x.sla)}${x.src ? `<span>${ic('file')}${esc(x.src)}</span>` : x.add ? '<span>Added here</span>' : ''}</small></span></li>`).join('');
+  return `<div class="og-sw${ogCls(st)}">${nav}<section class="panel og-sop">${ogTag(st)}<div class="ph"><h3>${esc(orgRN(G, s.id))}</h3><span class="note">${r && r.ppl.length ? esc(listAnd(r.ppl.map(p => p.split(',')[0]))) : ''}</span>${ed ? '' : `<button class="btn btn-s btn-sm" data-act="oged" data-v="${id}">${ic('pen')}Edit</button>`}</div><div class="pb">${s.steps.length ? `<ol class="og-st">${rows}</ol>` : '<p class="og-none">No steps yet.</p>'}
+  ${ed ? `<div class="fp-a"><button class="btn btn-s btn-sm" data-act="ogsadd" data-v="${s.id}">${ic('plus')}Add a step</button><button class="btn btn-p btn-sm" data-act="oged" data-v="">${ic('check')}Done</button></div>` : s.steps.length ? '' : `<div class="fp-a"><button class="btn btn-s btn-sm" data-act="ogsadd" data-v="${s.id}">${ic('plus')}Add a step</button></div>`}
+  <p class="fp-n">${s.steps.length ? 'Each step shows where it came from.' : ''}</p></div></section></div>`;
+}
+function ogEscHTML(G, dm) {
+  const roles = G.roles.length ? G.roles.map(r => [r.id, r.n]) : OROLE.map(([id, n]) => [id, n]);
+  const lvHTML = (e, l, i, ed) => {
+    if (!l) return ed && i === e.lv.length && i < 3 ? `<td><button class="btn btn-s btn-sm" data-act="ogladd" data-v="${e.id}">${ic('plus')}Add a level</button></td>` : '<td class="og-0">None</td>';
+    if (!ed) { const r = G.roles.find(x => x.id === l.r); return `<td><b>${esc(orgRN(G, l.r))}</b>${r && r.ppl.length ? `<small>${esc(listAnd(r.ppl.map(p => p.split(',')[0]).slice(0, 2)))}</small>` : ''}<span class="og-af">${ic('clock')}After ${esc(afterTxt(l))}</span></td>`; }
+    return `<td class="og-le"><select class="sel" data-og="er|${e.id}|${i}" aria-label="Level ${i + 1}: who">${roles.map(([id, n]) => `<option value="${id}"${id === l.r ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select><span class="og-lt"><input class="pin6 sm" type="number" min="1" data-og="en|${e.id}|${i}" value="${l.n}" aria-label="Level ${i + 1}: after how long"><select class="sel" data-og="eu|${e.id}|${i}" aria-label="Level ${i + 1}: unit">${Object.entries(UNITS).map(([k, u]) => `<option value="${k}"${k === l.u ? ' selected' : ''}>${u[0]}s</option>`).join('')}</select><button class="ibtn" data-act="ogldel" data-v="${e.id}|${i}" aria-label="Remove level ${i + 1}"${e.lv.length > 1 ? '' : ' disabled'}>${ic('x')}</button></span></td>`;
+  };
+  const row = e => { const id = 'esc|' + e.id, ed = ADM.oed === id, st = dm[id];
+    return `<tr class="${ed ? 'ed' : ''}${ogCls(st)}"><td>${ed ? `<textarea class="ta" rows="2" data-og="et|${e.id}" aria-label="When it applies">${esc(e.t)}</textarea>` : `<b>${esc(e.t)}</b>`}${ogTag(st)}</td>${[0, 1, 2].map(i => lvHTML(e, e.lv[i], i, ed)).join('')}<td class="og-ea"><span>${ed ? `<button class="ibtn" data-act="ogedel" data-v="${e.id}" aria-label="Remove this escalation" title="Remove">${ic('trash')}</button><button class="btn btn-p btn-sm" data-act="oged" data-v="">Done</button>` : `<button class="ibtn" data-act="oged" data-v="${id}" aria-label="Edit this escalation" title="Edit">${ic('pen')}</button>`}</span></td></tr>`; };
+  return `<section class="panel"><div class="ph"><h3>Escalation matrix</h3><span class="note">The system sends each one by itself, counted from when the step went past its turnaround</span></div><div class="pb og-ew"><table class="og-et"><thead><tr><th>When</th><th>Level 1</th><th>Level 2</th><th>Level 3</th><th><span class="vh11">Edit</span></th></tr></thead><tbody>${G.esc.map(row).join('') || '<tr><td colspan="5" class="og-0">No escalations yet. <button class="lnk" data-act="orgstd">Start from the standard matrix</button></td></tr>'}</tbody></table></div></section><button class="og-new wide" data-act="ogeadd">${ic('plus')}Add an escalation</button>`;
+}
+Object.assign(ACT, {
+  osec(v) { ADM.osec = v; ADM.oed = null; render(); },
+  osop(v) { ADM.osop = v; ADM.oed = null; render(); },
+  oged(v) { ADM.oed = v || null; render(); if (v) { const el = document.querySelector('.og-r.ed input, .og-st .ed textarea, tr.ed textarea'); if (el && v.indexOf('role|') === 0) el.focus(); } },
+  orgstd() { const B = orgBuild(ADM.onb.wf, { roles: 1, sops: !!ADM.onb.wf, esc: 1 }), G0 = ADM.org.onb; if (!G0) { ADM.org.onb = B; ADM.org.onbSrc = {}; } else { if (!G0.roles.length) G0.roles = B.roles; if (!G0.esc.length) G0.esc = B.esc; if (!G0.sops.length) G0.sops = B.sops; } const G = ADM.org.onb; alog2({ area: 'org', what: 'Started from the standard roles', a: plural(G.roles.length, 'role') + ', ' + plural(G.sops.length, 'SOP') + ', ' + plural(G.esc.length, 'escalation'), why: 'New setup' }); render(); },
+  ogpadd(v) { const el = $('#ogp-' + v), p = el ? el.value.replace(/\s+/g, ' ').trim() : ''; if (!p) { if (el) el.focus(); return; } const G = ORGC(), r = G.roles.find(x => x.id === v); if (r && r.ppl.includes(p)) { toast(p + ' is already in this role'); return; } ogOp({ k: 'padd', id: v, v: p }); render(); const n = $('#ogp-' + v); if (n) n.focus(); },
+  ogpdel(v) { const i = v.indexOf('|'); ogOp({ k: 'pdel', id: v.slice(0, i), v: v.slice(i + 1) }); render(); },
+  ogradd() { const id = 'r' + (++ADM.nid); ogOp({ k: 'radd', id, v: 'New role' }); ADM.osec = 'roles'; ADM.oed = 'role|' + id; render(); const el = document.querySelector('.og-r.ed input'); if (el) { el.focus(); el.select(); } },
+  ogrdel(v) { const G = ORGC(), n = orgRN(G, v); ogOp({ k: 'rdel', id: v }); ADM.oed = null; render(); toast('Removed the role “' + n + '”'); },
+  ogsadd(v) { const sid = ogNew(); ogOp({ k: 'sopadd', id: v, sid, t: 'New step', sla: '1 working day' }); ADM.oed = 'sop|' + v; render(); const el = document.querySelector('[data-og="st|' + v + '|' + sid + '"]'); if (el) { el.focus(); el.select(); } },
+  ogsdel(v) { const [id, sid] = v.split('|'); ogOp({ k: 'sdel', id, sid }); render(); },
+  ogsmv(v) { const [id, sid, d] = v.split('|'); ogOp({ k: 'smv', id, sid, d: +d }); render(); },
+  ogladd(v) { const G = ORGC(), e = G.esc.find(x => x.id === v); if (!e || e.lv.length >= 3) return; const used = e.lv.map(l => l.r), last = e.lv[e.lv.length - 1] || { n: 0, u: 'wd' }, r = ['rcm', 'zcm', 'nch', 'smgr', 'cops'].find(x => !used.includes(x)) || 'nch'; ogOp({ k: 'escadd', id: v, r, n: last.n + 1, u: last.u }); render(); },
+  ogldel(v) { const [id, i] = v.split('|'); ogOp({ k: 'ldel', id, i: +i }); render(); },
+  ogeadd() { const id = 'x' + (++ADM.nid); ogOp({ k: 'eadd', id, v: 'A step is past its turnaround' }); ADM.osec = 'esc'; ADM.oed = 'esc|' + id; render(); const el = document.querySelector('tr.ed textarea'); if (el) { el.focus(); el.select(); } },
+  ogedel(v) { ogOp({ k: 'edel', id: v }); ADM.oed = null; render(); }
+});
+
+/* ---------------- 1. Discovery: reading what was added ---------------- */
+Object.assign(ACT, {
+  dsrc(v) { const O = ADM.onb; O.src[v] = O.src[v] ? 0 : 1; if (v === 'POL') O.polOn = O.src[v]; render(); },
+  dread() {
+    const O = ADM.onb, D = ADM.disc, att = [].concat(...DGRP.map(g => g[4].map(x => x[0]))).filter(k => O.src[k]), txt = (O.txt || '').trim();
+    if (!att.length && !txt) return; TKP.stop();
+    D.steps = att.map(k => DREAD[k]).concat(txt ? ['Reading your own words'] : [], ['Finding steps, rules, fields, documents and roles', 'Building each section, with where every item came from']); D.step = 0; D.phase = 'run'; render();
+    const nx = () => { if (!ADM || ADM.disc !== D || D.phase !== 'run') return; D.step++; if (D.step < D.steps.length) { render(); setTimeout(nx, 380); return; }
+      discBuild(att, txt); D.phase = 'done'; Object.values(ADM.tk).forEach(t => Object.assign(t, tkNew())); render();
+      const built = [O.wf && 'the workflow', ADM.fm.onb && 'the forms', O.pol && 'the policy rules', ADM.org.onb && 'the roles'].filter(Boolean);
+      toast('Read ' + plural(att.length + (txt ? 1 : 0), 'source') + (built.length ? '. Built ' + listAnd(built) : '')); };
+    setTimeout(nx, 380);
+  },
+  resetall() { TKP.stop(); _resetall11(); },
+  asec(v) { TKP.stop(); _asec11(v); }
+});
+
+/* ---------------- inputs ---------------- */
+document.addEventListener('change', ev => {
+  const el = ev.target; if (!el || !el.dataset || S.view !== 'admin' || !ADM || !ADM.fm) return;
+  if (el.dataset.fm === 'coon' || el.dataset.fm === 'comax') { const F = FM(); if (!F) return; const on = el.dataset.fm === 'coon', key = on ? 'on' : 'max', v = on ? (el.checked ? 1 : 0) : Math.max(1, Math.min(4, +el.value || 1)); if (F.login.cofg[key] === v) return; fmOp({ k: 'cofg', form: 'login', v: { [key]: v } }); render(); return; }
+  if (el.dataset.fm) { const F = FM(); if (!F) return; const k = el.dataset.fm, v = k === 'amt' ? Math.max(0, Math.round(+el.value || 0)) : el.checked ? 1 : 0; if (F.login.fee[k] === v) return; fmOp({ k: 'fee', form: 'login', v: { [k]: v } }); render(); return; }
+  if (el.dataset.tk) { const [ctx, i] = el.dataset.tk.split('|'), p = ADM.tk[ctx].props[+i]; if (p) p.on = el.checked ? 1 : 0; render(); return; }
+  if (el.dataset.og) {
+    const [k, id, x] = el.dataset.og.split('|'), G = ORGC(); if (!G) return; const v = el.value.replace(/[ \t]+/g, ' ').trim();
+    if (k === 'rn' && v) ogOp({ k: 'rn', id, v });
+    else if (k === 'ra' && v) ogOp({ k: 'ra', id, v });
+    else if (k === 'rr') ogOp({ k: 'rr', id, v: el.value.split('\n').map(l => l.replace(/^\s*[-*•]\s*/, '').trim()).filter(Boolean) });
+    else if (k === 'st' && v) ogOp({ k: 'st', id, sid: x, v });
+    else if (k === 'ss' && v) ogOp({ k: 'ss', id, sid: x, v });
+    else if (k === 'et' && v) ogOp({ k: 'et', id, v });
+    else if (k === 'er') ogOp({ k: 'el', id, i: +x, v: { r: el.value } });
+    else if (k === 'en') { const n = Math.max(1, Math.round(+el.value || 1)); ogOp({ k: 'el', id, i: +x, v: { n } }); }
+    else if (k === 'eu') ogOp({ k: 'el', id, i: +x, v: { u: el.value } });
+    render();
+  }
+});
+document.addEventListener('input', ev => {
+  const el = ev.target; if (!el || !ADM || !ADM.tk) return;
+  const m = el.id && el.id.match(/^tktxt-(lead|login|org)$/);
+  if (m) { ADM.tk[m[1]].txt = el.value; const g = $('#tkGo-' + m[1]); if (g) g.disabled = !el.value.trim(); }
+  if (el.id === 'ocap') { const n = Object.keys(ADM.onb.src).filter(k => ADM.onb.src[k]).length + (el.value.trim() ? 1 : 0), g = $('#dreadGo'), c = $('#dcN'); if (g) g.disabled = !n; if (c) c.textContent = plural(n, 'source') + ' added'; }
+});
+document.addEventListener('keydown', ev => {
+  const t = ev.target; if (!t || !t.id || ev.key !== 'Enter') return;
+  if (/^ogp-/.test(t.id)) { ev.preventDefault(); ACT.ogpadd(t.id.slice(4)); }
+});
+
+/* ---------------- the live page's Change something finds form and role changes too ---------------- */
+TXTSUG.push('Make PAN mandatory at the lead');
+const _parseChanges11 = parseChanges, _applyOps11 = applyOps, _ikadd11 = ACT.ikadd, _ikHTML11 = ikHTML;
+parseChanges = function (txt) {
+  const r = _parseChanges11(txt); if (!ADM || ONB() || !ADM.fm) return r;
+  const Wf = deep(ADM.fm.liveW), Wo = deep(ADM.org.liveW), who = ADM.ik.k === 'voice' ? 'nch' : 'losadm', miss = [];
+  r.miss.forEach(s0 => {
+    let got = null;
+    for (const ctx of ['lead', 'login']) { const x = fmParse(ctx, s0, Wf); if (x.props) { got = x.props; break; } }
+    if (!got) { const x = ogParse(s0, who, Wo); if (x.props) got = x.props; }
+    if (got) got.forEach(p => { p.on = 1; p.q = s0; p.ch = []; r.props.push(p); }); else miss.push(s0);
+  });
+  r.miss = miss; return r;
+};
+applyOps = function (p) { if (p.ops) { p.ops.forEach(op => { if (p.area === 'form') fmOp(op); else ogOp(op); }); return; } _applyOps11(p); };
+ACT.ikadd = function () {
+  const P = ADM.ik.props.filter(p => p.on), f = P[0]; _ikadd11();
+  if (f && f.area === 'form') { ADM.fsel = f.ops[0].form === 'login' ? 'T3' : 'T1'; render(); }
+  if (f && f.area === 'org') { const k = f.ops[0].k; ADM.osec = /^esc/.test(k) ? 'esc' : k === 'sopadd' ? 'sops' : 'roles'; render(); }
+};
+ikHTML = function () { return _ikHTML11().replace('The system finds the changes across the workflow, the rules and the vendors.', 'The system finds the changes across the workflow, the forms, the rules, the vendors and the roles.'); };
+
+/* =====================================================================
+   v12: a co-applicant can be added at login. They get their own consent
+   SMS and upload link. What they earn counts straight away, as declared,
+   and is checked against their documents when those come in.
+   ===================================================================== */
+Object.assign(ICO, { userplus: '<path d="M15 20v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 3 18.5V20"/><circle cx="9" cy="8" r="3.5"/><path d="M19 8v6M22 11h-6"/>' });
+const COREL = ['Spouse', 'Father', 'Mother', 'Son', 'Daughter', 'Brother', 'Sister', 'Other relative'];
+const COSEX = { Father: 'M', Son: 'M', Brother: 'M', Mother: 'F', Daughter: 'F', Sister: 'F' };
+const COEMP = [['sal', 'Salaried'], ['se', 'Self-employed'], ['no', 'Does not earn']];
+/* the RM's screen runs on the live setup; Form design on the Admin page previews changes to it */
+const coCfg = () => FORM0.login.cofg;
+const coWhen = (k, emp) => { const w = CDOC[k][1]; return w === 'Every co-applicant' || (emp === 'sal' && /salaried/.test(w)) || (emp === 'se' && /self-employed/.test(w)); };
+const CODT = { pan: ['pan', 'PAN', 1, 'jpg'], adh: ['adh', 'Aadhaar (masked)', 1, 'pdf'], sal: ['sal', 'Salary slips, Aug to Oct 2026', 2, 'pdf'], f16: ['f16', 'Form 16, two years', 2, 'pdf'], itr: ['itr', 'ITR with computation, two years', 2, 'pdf'], bank12: ['bnk', 'Bank statements, 12 months', 3, 'pdf'], bank6: ['bnk', 'Bank statements, 6 months', 3, 'pdf'], photo: ['pho', 'Photograph', 1, 'jpg'], relp: ['rlp', 'Proof of relationship', 1, 'pdf'] };
+const COPROF = { sal: { occ: 'Assistant professor', org: 'Deccan College of Commerce', orgCat: 'B', yrs: 5 }, se: { occ: 'Runs a boutique', org: 'Own business', orgCat: null, yrs: 6 } };
+/* what the co-applicant's documents show when they arrive */
+const coVals = (aid, emp) => emp === 'sal' ? { ['sal_' + aid]: [['August 2026', 61800], ['September 2026', 62000], ['October 2026', 62400]], ['f16_' + aid]: [['FY 2025-26, a month', 59500]] }
+  : emp === 'se' ? { ['itr_' + aid]: [['FY 2025-26, a month', 58000], ['FY 2024-25, a month', 52500]] } : {};
+const fnA = a => a.name.split(' ')[0];
+const pron = a => a.sex === 'F' ? 'her' : a.sex === 'M' ? 'his' : 'their';
+const coLive = (c, aid, k) => CASES.includes(c) ? c.apps.find(a => a.id === aid && a.coK === k) : null;
+const coDocs = (c, a) => c.docs.filter(d => d.who === a.id && d.need === 'login');
+const coPan = a => 'CQXP' + ((a.name.split(' ').slice(-1)[0] || 'X')[0] || 'X').toUpperCase() + '3390K';
+function coNew(c) { return { rel: 'Spouse', first: '', last: c.apps[0].name.split(' ').slice(-1)[0], mob: '', emp: 'sal', inc: '', own: 1, bad: [] }; }
+
+/* ---------------- the panel the RM fills in ---------------- */
+function coSheet() {
+  if (!S.sheet || S.sheet.k !== 'coapp') return '';
+  const c = C(); if (!c) return '';
+  const X = S.co || (S.co = coNew(c)), m = fnA(c.apps[0]), first = X.first.trim(), them = first || 'the co-applicant', cfg = coCfg();
+  const docs = FORM0.login.codocs.filter(d => coWhen(d.k, X.emp));
+  const fld = (k, l, req, ctl) => `<label class="nl9-f${X.bad.includes(k) ? ' bad' : ''}"><span class="nl-l">${esc(l)}${req ? '<i class="req" aria-hidden="true">*</i>' : ''}</span>${ctl}</label>`;
+  const inp = (k, l, req, extra) => fld(k, l, req, `<input class="inp2" data-co="${k}" value="${esc(X[k])}" autocomplete="off"${extra || ''} aria-label="${esc(l)}"${req ? ' aria-required="true"' : ''}>`);
+  const body = `<section class="nl9-s"><div class="nl9-h"><b>Co-applicant</b><span>Joins ${esc(m)} on this loan. They get their own consent SMS and upload link.</span></div>
+  <div class="nl9-g">${inp('first', 'First name', 1, ' data-autofocus')}${inp('last', 'Last name', 0)}${fld('rel', 'Relationship to ' + m, 0, `<select class="inp2" data-co="rel" aria-label="Relationship to ${esc(m)}">${COREL.map(o => `<option${X.rel === o ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`)}${inp('mob', 'Contact number', 1, ' inputmode="tel" placeholder="10-digit mobile"')}</div></section>
+  <section class="nl9-s"><div class="nl9-h"><b>Income</b><span>${X.emp === 'no' ? 'Not counted towards eligibility.' : 'Counts towards eligibility straight away, as declared. The system checks it against their documents when they come in.'}</span></div>
+  <div class="seg2 co-emp" role="radiogroup" aria-label="Work">${COEMP.map(([k, l]) => `<button class="${X.emp === k ? 'on' : ''}" data-act="coemp" data-v="${k}" role="radio" aria-checked="${X.emp === k}">${l}</button>`).join('')}</div>
+  ${X.emp === 'no' ? '' : `<div class="nl9-g">${inp('inc', X.emp === 'sal' ? 'Monthly pay, as declared (₹)' : 'Monthly income, as declared (₹)', 1, ' inputmode="numeric"')}</div>`}</section>
+  <section class="nl9-s"><div class="nl9-h"><b>The property</b></div><label class="co-own"><input type="checkbox" data-co="own"${X.own ? ' checked' : ''}><span><b>Co-owner of the property</b><small>The sale deed will be in both names.</small></span></label></section>
+  <section class="nl9-s"><div class="nl9-h"><b>Documents they upload</b><span>${plural(docs.length, 'document')}, through their own link</span></div><div class="nl9-ds">${docs.map(d => `<div class="nl9-d">${ic('file')}<div><b>${esc(CDOC[d.k][0])}</b><small>${d.req ? 'Required' : 'Optional'}</small></div></div>`).join('')}</div></section>
+  <div class="nl9-c">${ic('lock')}<p><b>Their own consent.</b> An SMS asks ${esc(them)} to approve a credit report pull, which records an enquiry, and 12 months of bank data through the Account Aggregator. It carries the link to upload these documents.</p></div>`;
+  return `<div class="scrim" data-act="shclose"></div><aside class="as open nl9 co12" role="dialog" aria-modal="true" aria-label="Add a co-applicant"><div class="as-h"><div><b>Add a co-applicant</b><small>${esc(c.v.appNo)}, ${esc(caseName(c))}</small></div><button class="nic" data-act="shclose" aria-label="Close">${ic('x')}</button></div>
+  <div class="as-b nl9-b" id="cob">${body}</div>
+  <div class="as-f nl-f2"><span class="nl-hint">Up to ${plural(cfg.max, 'co-applicant')} on a file.</span><button class="btn btn-s" data-act="shclose">Cancel</button><button class="btn btn-p" data-act="cogo">${ic('send')}Add and send the SMS</button></div></aside>`;
+}
+const _nlSheet12 = nlSheet;
+nlSheet = function () { return coSheet() || _nlSheet12(); };
+document.addEventListener('input', ev => {
+  const el = ev.target; if (!el || !el.dataset || !el.dataset.co || !S.co) return;
+  const k = el.dataset.co; S.co[k] = el.type === 'checkbox' ? (el.checked ? 1 : 0) : el.value;
+  if (S.co.bad.includes(k)) { S.co.bad = S.co.bad.filter(x => x !== k); const l = el.closest('label'); if (l) l.classList.remove('bad'); }
+});
+document.addEventListener('change', ev => {
+  const el = ev.target; if (!el || !el.dataset || !el.dataset.co || !S.co) return;
+  const k = el.dataset.co; S.co[k] = el.type === 'checkbox' ? (el.checked ? 1 : 0) : el.value;
+});
+
+/* ---------------- adding one: the SMS goes out, and the income counts at once ---------------- */
+function coAdd(c, X) {
+  const ids = c.apps.map(a => a.id); let n = 2; while (ids.includes('a' + n)) n++;
+  const aid = 'a' + n, first = cap1(X.first.trim()), last = X.last.trim() ? cap1(X.last.trim()) : '', name = (first + ' ' + last).trim(), emp = X.emp, earning = emp !== 'no';
+  const inc = earning ? Math.round(nlNum(X.inc)) : 0, me = meWho(), mob = X.mob.replace(/\D/g, '').slice(-10), at = tick(1), k = Date.now() + Math.random();
+  const sex = COSEX[X.rel] || (X.rel === 'Spouse' ? ({ M: 'F', F: 'M' })[c.apps[0].sex] || null : null);
+  const a = { id: aid, role: 'Co-applicant', rel: X.rel + (X.own ? ', co-owner' : ''), name, ini: inits(name) || name.slice(0, 1).toUpperCase(), age: null, sex,
+    emp: earning ? (emp === 'sal' ? 'Salaried' : 'Self-employed') : 'Not earning', occ: '', org: '', orgCat: null, yrs: 0, inc, incDecl: inc,
+    incSrc: earning ? 'Declared at login by ' + me.name : 'No income considered', earning, cibil: null, dpd: Z24, enq6: 0, accts: 0, pan: '', aadhaar: '',
+    ckyc: 'Searched when the KYC documents are in', addr: c.apps[0].addr, mobile: mask10(mob), email: '',
+    coAt: at, coBy: me.name, coK: k, coSt: 'sent', coEmp: emp, coMob: mob, docVals: coVals(aid, emp) };
+  c.apps.push(a);
+  if (X.own && c.prop && c.prop.owners && !c.prop.owners.includes(aid)) c.prop.owners.push(aid);
+  const docs = FORM0.login.codocs.filter(d => coWhen(d.k, emp));
+  docs.forEach(d => { const [p, t, ci, ext] = CODT[d.k]; c.docs.push(Object.assign(dk(p + '_' + aid, t + ', ' + first, DCAT[ci], d.req ? 'login' : 'opt', t.split(',')[0].replace(/\W+/g, '_').replace(/_+$/, '') + '_' + first + '.' + ext), { who: aid })); });
+  log(c, meW(), 'data', 'Co-applicant added at login: ' + name, X.rel + (X.own ? ', co-owner of the property' : '') + '. ' + (earning ? a.emp + ', ' + inr(inc) + ' a month as declared.' : 'Does not earn; no income counted.'), { at });
+  log(c, who('sys', 'System', 'Messages'), 'comms', 'Consent request and upload link sent by SMS to ' + first, '+91 ' + mask10(mob) + '. Privacy notice version 3.2. ' + plural(docs.length, 'document') + ' to upload.');
+  if (earning) { const key = 'inc:' + aid; (c.w.fx0 = c.w.fx0 || {})[key] = 0; fxApply(c, key, fxMatch(c, key, inc), 0, inc, { by: me.name, at, role: S.role, decl: 1 }); }
+  if (c.w.sysAt) c.w.sysAt = tick(1);
+  later(SOON.otp, () => coConsent(c, aid, k));
+  return a;
+}
+/* a few seconds later the co-applicant approves the SMS; the credit report comes with it */
+function coConsent(c, aid, k) {
+  const a = coLive(c, aid, k); if (!a || a.coSt !== 'sent') return;
+  a.coSt = 'consent'; a.consentAt = tick(1);
+  log(c, who('cus', a.name, 'Co-applicant'), 'comms', 'Consent given by OTP', 'Credit report and bank data. Privacy notice version 3.2.', { at: a.consentAt });
+  const nth = c.apps.filter(x => x.coAt).indexOf(a), score = [774, 752, 768, 781][nth % 4];
+  Object.assign(a, { cibil: score, accts: a.coEmp === 'sal' ? 2 : 1, enq6: 1, dpd: Z24 });
+  let ob = null;
+  if (a.coEmp === 'sal') { let i = c.oblig.length + 1; while (c.oblig.some(o => o.id === 'o' + i)) i++; ob = { id: 'o' + i, who: aid, t: 'Two-wheeler loan, ' + fnA(a), lender: 'An NBFC', emi: 2400, out: 31000, left: 14, count: true, why: '' }; c.oblig.push(ob); }
+  log(c, who('sys', 'System', 'Credit bureau'), 'data', 'Credit report pulled for ' + fnA(a), 'CIBIL ' + score + '. ' + plural(a.accts, 'account') + ', no late payments in 24 months.' + (ob ? ' A two-wheeler loan of ' + inr(ob.emi) + ' a month counts in FOIR.' : ''));
+  render(); toast(fnA(a) + ' gave consent. Credit report: CIBIL ' + score);
+  later(SOON.reply, () => coUpload(c, aid, k));
+}
+/* then uploads the documents through their own link */
+function coUpload(c, aid, k) {
+  const a = coLive(c, aid, k); if (!a) return;
+  const m = c.docs.filter(d => d.who === aid && !d.up && ['login', 'opt'].includes(d.need)); if (!m.length) return;
+  const at = tick(2); m.forEach(d => { d.up = { f: d.sample, at, by: a.name }; });
+  log(c, who('cus', a.name, 'Co-applicant'), 'doc', 'Uploaded ' + plural(m.length, 'document') + ' from ' + pron(a) + ' own link', listAnd(m.map(d => lc1(d.t.replace(', ' + fnA(a), '')))) + '.', { at });
+  const start = !loginMissing(c).length && c.tasks.some(t => t.st === 'todo');
+  afterDocs(c);
+  const F = (c.w.fx || {})['inc:' + aid];
+  render();
+  toast(fnA(a) + '’s documents are in' + (F ? F.st === 'match' ? '. ' + cap1(pron(a)) + ' pay matches ' + F.doc : F.st === 'within' ? '. The declared pay is within what they show' : F.st === 'none' ? '. None shows the declared pay: sanction condition added' : '' : '') + (start ? '. The checks have started' : ''));
+}
+/* whoever uploads them, the documents fill in the details and settle the declared income */
+function coSync(c) {
+  c.apps.forEach(a => {
+    if (!a.coAt) return;
+    const up = p => { const d = c.docs.find(x => x.id === p + '_' + a.id); return !!(d && d.up); };
+    if (!a.kycAt && up('pan') && up('adh')) {
+      a.kycAt = tick(1); a.pan = coPan(a); a.aadhaar = 'XXXX XXXX ' + a.coMob.slice(-4); a.age = a.age || 33; a.ckyc = 'Found and downloaded';
+      log(c, who('sys', 'System', 'KYC and dedupe'), 'data', 'KYC checked for ' + fnA(a), 'PAN verified with the Income Tax database. Aadhaar e-KYC done, stored masked. CKYC: found and downloaded. No match in the dedupe.');
+    }
+    if (a.earning && !a.workAt && (up('sal') || up('itr'))) { a.workAt = 1; Object.assign(a, COPROF[a.coEmp] || {}); }
+  });
+  fxRecheck(c);
+  c.apps.forEach(a => {
+    if (!a.coAt || !a.earning) return; const F = (c.w.fx || {})['inc:' + a.id]; if (!F) return;
+    a.incSrc = F.st === 'match' || F.st === 'within' ? (a.coEmp === 'sal' ? 'Salary slips and Form 16' : 'ITR with computation') : F.st === 'none' ? 'Declared at login. No document shows it' : 'Declared at login by ' + a.coBy;
+  });
+}
+const _afterDocs12 = afterDocs, _cusOrder12 = cusOrder;
+afterDocs = function (c) { coSync(c); return _afterDocs12(c); };
+cusOrder = function (c) { coSync(c); return _cusOrder12(c); };
+/* removed before the checks: the documents and the declared income go with them */
+function coRemove(c, aid) {
+  const a = c.apps.find(x => x.id === aid); if (!a || !a.coAt) return null;
+  c.apps = c.apps.filter(x => x.id !== aid);
+  if (c.prop && c.prop.owners) c.prop.owners = c.prop.owners.filter(x => x !== aid);
+  const obs = c.oblig.filter(o => o.who === aid).map(o => o.id); c.oblig = c.oblig.filter(o => o.who !== aid);
+  ['inc:' + aid].concat(obs.map(id => 'ob:' + id)).forEach(key => { fxClear(c, key); ['fx', 'fx0', 'edited'].forEach(w => { if (c.w[w]) delete c.w[w][key]; }); });
+  c.docs = c.docs.filter(d => d.who !== aid);
+  if (c.w.fxT && !Object.values(c.w.fx || {}).some(x => x.cond && x.raise)) { c.w.touched = false; c.w.fxT = 0; }
+  if (S.edit && S.edit.indexOf(aid) >= 0) S.edit = null;
+  log(c, meW(), 'data', 'Co-applicant removed: ' + a.name, 'Removed before the checks. Their documents and declared income no longer count.');
+  afterDocs(c);
+  return a;
+}
+Object.assign(ACT, {
+  coadd() { const c = C(); if (!c) return; S.co = coNew(c); S.coDel = null; S.sheet = { k: 'coapp' }; render(); const el = document.querySelector('[data-co="first"]'); if (el) el.focus(); },
+  coemp(v) { if (!S.co) return; S.co.emp = v; S.co.bad = S.co.bad.filter(x => x !== 'inc'); render(); },
+  cogo() {
+    const c = C(), X = S.co; if (!c || !X) return;
+    const mob = X.mob.replace(/\D/g, ''), bad = [];
+    if (!X.first.trim()) bad.push('first'); if (mob.length !== 10) bad.push('mob'); if (X.emp !== 'no' && !(nlNum(X.inc) > 0)) bad.push('inc');
+    if (bad.length) { X.bad = bad; render(); toast(bad[0] === 'first' ? 'Add the first name' : bad[0] === 'mob' ? 'Add a 10-digit mobile number' : 'Add the monthly pay, as declared'); const el = document.querySelector('[data-co="' + bad[0] + '"]'); if (el) el.focus(); return; }
+    const a = coAdd(c, X); S.co = null; S.sheet = null; render(); toast('Added ' + a.name + '. Consent SMS and upload link sent to ' + fnA(a));
+  },
+  codel(v) { const c = C(); if (!c) return; if (S.coDel !== v) { S.coDel = v; render(); return; } S.coDel = null; const a = coRemove(c, v); render(); if (a) toast('Removed ' + a.name + ' from the file'); },
+  cokeep() { S.coDel = null; render(); }
+});
+const _shclose12 = ACT.shclose, _reset12 = ACT.resetall;
+Object.assign(ACT, {
+  shclose() { if (S.sheet && S.sheet.k === 'coapp') S.co = null; _shclose12(); },
+  resetall() { S.co = null; S.coDel = null; _reset12(); }
+});
+
+/* ---------------- the login screen: documents on the left, applicants on the right ---------------- */
+loginDocsHTML = function () {
+  const c = C(), need = c.docs.filter(d => d.need === 'login'), main = need.filter(d => !d.who), n = need.filter(d => d.up).length, can = ['sales', 'cm'].includes(S.role);
+  const pre = c.docs.filter(d => d.need === 'pre' && d.up), cats = [...new Set(main.map(d => d.cat))], open = c.tasks.filter(t => t.kind !== 'sys' && t.st === 'todo');
+  const left = need.length - n, cos = c.apps.filter(a => c.docs.some(d => d.who === a.id)), links = ['the customer'].concat(cos.map(fnA));
+  const lead = left ? plural(left, 'document') + ' still to come. ' + cap1(listAnd(links)) + (links.length > 1 ? ' have upload links' : ' has an upload link') + (can ? '; you can upload them here too.' : '.') : 'Everything needed to start the checks is in.';
+  const coSec = cos.map(a => { const it = c.docs.filter(d => d.who === a.id && ['login', 'opt'].includes(d.need)), req = it.filter(d => d.need === 'login'); return `<section class="dcat co"><header><b>${esc(a.name)}, co-applicant</b><span>${req.filter(d => d.up).length} of ${req.length}</span></header>${it.map(d => docRow2(c, d, !can, 'Link sent to ' + fnA(a))).join('')}</section>`; }).join('');
+  return `<div class="lg-badge"><span class="rec-b">${ic('check')}Logged in as ${esc(c.v.appNo)}</span></div>
+  <div class="up-h"><div><h2>Documents due</h2><p>${esc(lead)}</p></div>${can && left ? `<div class="up-act"><button class="btn btn-s btn-sm" data-act="loadlogin">${ic('upload')}Upload documents</button></div>` : ''}</div>
+  <div class="up-bar"><i style="width:${need.length ? n / need.length * 100 : 0}%"></i></div>
+  <div class="cats" style="margin-top:12px">${cats.map(cat => { const it = main.filter(d => d.cat === cat); return `<section class="dcat"><header><b>${cat}</b><span>${it.filter(d => d.up).length} of ${it.length}</span></header>${it.map(d => docRow2(c, d, !can, 'Link sent to the customer')).join('')}</section>`; }).join('')}${coSec}</div>
+  ${open.length ? `<section class="panel" style="margin-top:14px"><div class="ph"><h3>Ordered the moment they are in</h3><span class="note">The system assigns these to the panel vendors</span></div><div class="pb">${open.map(t => `<div class="cgi">${ic('clock')}<div><b>${esc(t.t)}</b><small>${esc(t.vendor)}, ${plural(t.slaD, 'working day')}</small></div><span class="when">After the documents</span></div>`).join('')}</div></section>` : ''}
+  ${pre.length ? `<section class="panel" style="margin-top:14px"><div class="ph"><h3>Already in</h3><span class="note">${plural(pre.length, 'document')} from the pre-screen</span><button class="lnk act" data-act="tab" data-v="docs">All documents</button></div><div class="pb"><ul class="lg-in">${pre.map(d => `<li>${ic('check')}<span>${esc(d.t)}</span><small>${esc(fds(d.up.at))}</small></li>`).join('')}</ul></div></section>` : ''}`;
+};
+function coPanelHTML(c) {
+  const can = ['sales', 'cm'].includes(S.role) && canEdit(c), cfg = coCfg(), nCo = c.apps.length - 1, room = cfg.on && nCo < cfg.max;
+  const step = (cls, l, t, spin) => `<span class="co-s ${cls}">${spin ? '<span class="spin"></span>' : ic(cls === 'ok' ? 'check' : 'clock')}<b>${l}</b><span>${esc(t)}</span></span>`;
+  const row = (a, i) => {
+    let st = '';
+    if (a.coAt) {
+      const D = coDocs(c, a), dIn = D.filter(d => d.up).length;
+      st = `<div class="co-st">${step(a.coSt === 'sent' ? 'run' : 'ok', 'Consent', a.coSt === 'sent' ? 'SMS sent, waiting for ' + pron(a) + ' OTP' : 'Given by OTP, ' + ftime(a.consentAt), a.coSt === 'sent')}${step(a.cibil ? 'ok' : 'wait', 'Credit report', a.cibil ? 'CIBIL ' + a.cibil : 'After consent')}${step(dIn === D.length ? 'ok' : 'wait', 'Documents', dIn === D.length ? 'All ' + D.length + ' in' : dIn + ' of ' + D.length + ', through ' + pron(a) + ' link')}</div>`;
+    }
+    const sub = i === 0 ? 'Applicant' + (a.cibil ? '. CIBIL ' + a.cibil : '') : 'Co-applicant, ' + lc1(a.rel) + '. ' + (a.earning ? a.emp + ', ' + inr(a.inc) + ' a month' + (a.coAt && a.incSrc.indexOf('Declared') === 0 ? ' as declared' : '') : 'Not earning') + (!a.coAt && a.cibil ? '. CIBIL ' + a.cibil : '');
+    const del = a.coAt && can ? (S.coDel === a.id ? `<span class="co-del"><button class="btn btn-s btn-sm co-rm" data-act="codel" data-v="${a.id}">${ic('trash')}Remove ${esc(fnA(a))}</button><button class="lnk" data-act="cokeep">Keep</button></span>` : `<button class="lnk co-x" data-act="codel" data-v="${a.id}" aria-label="Remove ${esc(a.name)}">Remove</button>`) : '';
+    return `<div class="co-r${a.coAt ? ' new' : ''}"><span class="av2">${esc(a.ini)}</span><div class="co-b"><b>${esc(a.name)}</b><small>${esc(sub)}</small>${st}</div>${del}</div>`;
+  };
+  const add = c.apps.some(a => a.coAt), f = E && E.f, m = E && E.m;
+  const sum = add && f && f.incKnown && m && m.foir != null ? `<p class="co-sum">${ic('zap')}<span>Income counted for the loan: <b>${esc(inr(f.incElig))} a month</b>. FOIR ${esc(pctf(m.foir))}, against a ${esc(String(m.foirCap))}% cap.</span></p>` : '';
+  return `<section class="panel co-p"><div class="ph"><h3>Applicants</h3><span class="note">${plural(c.apps.length, 'person', 'people')} on the loan</span>${can && room ? `<button class="btn btn-s btn-sm act" data-act="coadd">${ic('userplus')}Add a co-applicant</button>` : ''}</div><div class="pb">${c.apps.map(row).join('')}${sum}${can && cfg.on && !room ? `<p class="co-n">Up to ${esc(plural(cfg.max, 'co-applicant'))} on a file.</p>` : ''}</div></section>`;
+}
+const _ovLeft12 = ovLeft;
+ovLeft = function () {
+  const h = _ovLeft12(), c = C();
+  return E && E.st.k === 'docs' && !(c.lead && !c.lead.in) ? h.replace('<div class="stack ovl">', '<div class="stack ovl">' + coPanelHTML(c)) : h;
+};
+/* a declared income shows as declared until a document shows it */
+const _editRow12 = editRow;
+editRow = function (c, key, label, val, src, hint, input) {
+  if (fxIs(key, 'inc:') && src !== 'edit') { const a = c.apps.find(x => x.id === key.slice(4)), F = (c.w.fx || {})[key]; if (a && a.coAt) src = F && (F.st === 'match' || F.st === 'within') ? 'ver' : 'dec'; }
+  return _editRow12(c, key, label, val, src, hint, input);
+};
+
+/* ---------------- the main applicant's page: the co-applicant uses their own link ---------------- */
+const _cusHTML12 = cusHTML;
+cusHTML = function () {
+  const c = cusCase(); if (!c || !cusSigned(c.id) || !c.docs.some(d => d.who)) return _cusHTML12();
+  const all = c.docs, lm = loginMissing, mine = all.filter(d => !d.who), coPend = all.filter(d => d.who && d.need === 'login' && !d.up);
+  let h;
+  loginMissing = x => x === c ? all.filter(d => d.need === 'login' && !d.up) : lm(x); c.docs = mine;
+  try { h = _cusHTML12(); } finally { c.docs = all; loginMissing = lm; }
+  const own = mine.filter(d => d.need === 'login' && !d.up).length, cos = c.apps.filter(a => coPend.some(d => d.who === a.id));
+  if (cos.length) {
+    const names = listAnd(cos.map(fnA)), line = (cos.length === 1 ? fnA(cos[0]) + ' is sending ' + pron(cos[0]) : names + ' are sending their') + ' ' + plural(coPend.length, 'document') + ' through ' + (cos.length === 1 ? pron(cos[0]) + ' own link' : 'their own links');
+    h = h.replace(/Upload the \d+ documents? below\. As soon as they are in, we start the property and legal checks\./, esc((own ? 'Upload the ' + plural(own, 'document') + ' below. ' : '') + line + '. As soon as they are in, we start the property and legal checks.'));
+    if (!own) h = h.replace('<h1>We need a few more documents</h1>', '<h1>' + esc('We are waiting for ' + names + '’s documents') + '</h1>');
+    h = h.replace('<details class="cus-got">', `<p class="cus-co">${ic('clock')}<span>${esc(line)}.</span></p><details class="cus-got">`);
+  }
+  const need = all.filter(d => d.need === 'login'), nIn = need.filter(d => d.up).length;
+  return h.replace(/<b>Documents<\/b><small>[^<]*<\/small>/, `<b>Documents</b><small>${nIn < need.length ? nIn + ' of ' + need.length + ' in' : 'All in'}</small>`);
+};
+function coLeftMsg(c) {
+  const own = c.docs.filter(d => d.need === 'login' && !d.up && !d.who).length, co = c.docs.filter(d => d.who && d.need === 'login' && !d.up);
+  const names = listAnd([...new Set(co.map(d => fnA(c.apps.find(a => a.id === d.who))))]);
+  return own ? 'Uploaded. ' + plural(own, 'document') + ' to go' : co.length ? 'Uploaded. Thank you. We are waiting for ' + names + '’s documents' : 'Uploaded. Thank you';
+}
+const _cup12 = ACT.cup, _call12 = ACT.call;
+Object.assign(ACT, {
+  cup(v) {
+    const c = cusCase(); if (!c || !c.docs.some(d => d.who)) return _cup12(v);
+    const d = c.docs.find(x => x.id === v); if (!d || d.up || d.who || S.creading) return;
+    S.creading = v; render();
+    setTimeout(() => { d.up = { f: d.sample, at: tick(1), by: c.apps[0].name }; S.creading = null; log(c, who('cus', c.apps[0].name, 'Customer'), 'doc', 'Uploaded ' + lc1(d.t) + ' from the customer’s page', d.sample); const o = cusOrder(c); render(); toast(o ? 'Thank you. We have everything we need and have started the checks' : coLeftMsg(c)); }, 800);
+  },
+  call() {
+    const c = cusCase(); if (!c || !c.docs.some(d => d.who)) return _call12();
+    const m = c.docs.filter(d => d.need === 'login' && !d.up && !d.who); if (!m.length) return;
+    m.forEach(d => { d.up = { f: d.sample, at: tick(1), by: c.apps[0].name }; });
+    log(c, who('cus', c.apps[0].name, 'Customer'), 'doc', 'Uploaded ' + plural(m.length, 'document') + ' from the customer’s page', listAnd(m.map(d => lc1(d.t))) + '.');
+    const o = cusOrder(c); render(); toast(o ? 'Thank you. We have everything we need and have started the checks' : coLeftMsg(c));
+  }
+});
+
+/* until a co-applicant gives consent, their credit report is awaited, not missing */
+const _fullEval12 = fullEval;
+fullEval = function (c, pol) {
+  const ev = _fullEval12(c, pol); if (!c || !c.apps || !ev || !ev.R) return ev;
+  const wait = c.apps.filter(a => a.coAt && a.coSt === 'sent'), r = ev.R.find(x => x.id === 'r_ntc');
+  if (wait.length && r && r.st === 'fail' && !(ev.f && ev.f.ntcPrimary) && c.apps.slice(1).filter(a => a.earning && !a.cibil).every(a => wait.includes(a)))
+    Object.assign(r, { st: 'needs', kind: null, lvl: null, v: 'Waiting for ' + listAnd(wait.map(fnA)) + '’s credit report', lim: 'Pulled when they give consent' });
+  return ev;
+};
+
+/* ---------------- start-up: always the last file ---------------- */
+initAdmin(); initCases(); applyTheme();
 
 
 /* ---------------- events: bound once, when the app mounts ---------------- */
